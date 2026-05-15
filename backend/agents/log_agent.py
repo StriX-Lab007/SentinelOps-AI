@@ -46,6 +46,12 @@ def log_agent(state: AgentState) -> AgentState:
     try:
         payload = state.get("alert_payload") or {}
         service = payload.get("service", "unknown")
+        
+        simulate = "llm_failure" in state.get("simulate_failures", "")
+        retries = state.get("log_agent_retries", 0)
+        
+        if simulate and retries == 0:
+            raise Exception("Rate limit exceeded for fallback_model (HTTP 429)")
 
         try:
             raw_logs = get_recent_logs(service, limit=50)

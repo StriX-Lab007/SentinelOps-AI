@@ -79,7 +79,7 @@ export default function IncidentDashboard() {
         </div>
         
         {!isInvestigating && !causalChain ? (
-          <Button onClick={startInvestigation} size="lg" className="bg-blue-600 hover:bg-blue-700">
+          <Button onClick={() => startInvestigation()} size="lg" className="bg-blue-600 hover:bg-blue-700">
             <Play className="mr-2 h-4 w-4" /> Simulate Webhook Trigger
           </Button>
         ) : (

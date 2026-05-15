@@ -4,10 +4,12 @@ import React, { useState } from 'react';
 import { AnimatePresence, motion, Variants } from 'framer-motion';
 import Sidebar from '@/components/shared/Sidebar';
 import CommandCenter from '@/components/dashboard/CommandCenter';
+import IncidentReplayDashboard from '@/components/dashboard/IncidentReplayDashboard';
 import GeneratedArtifactsView from '@/components/artifacts/GeneratedArtifactsView';
 import OrchestrationView from '@/components/orchestration/OrchestrationView';
 import IncidentDetail from '@/components/incident/IncidentDetail';
 import AgentsView from '@/components/agents/AgentsView';
+import { useIncidentStore } from '@/store/useIncidentStore';
 
 const pageVariants: Variants = {
   initial: { opacity: 0, y: 8 },
@@ -15,10 +17,18 @@ const pageVariants: Variants = {
   exit:    { opacity: 0, y: -4, transition: { duration: 0.12 } },
 };
 
+import { ApprovalModal } from '@/components/dashboard/ApprovalModal';
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState('command');
+  const { isInvestigating } = useIncidentStore();
 
   const renderView = () => {
+    // When investigating, show the new IncidentReplayDashboard on command tab
+    if (isInvestigating && activeTab === 'command') {
+      return <IncidentReplayDashboard />;
+    }
+
     switch (activeTab) {
       case 'command':        return <CommandCenter onNavigate={setActiveTab} />;
       case 'incidents':      return <IncidentDetail />;
@@ -50,6 +60,7 @@ export default function Home() {
           </motion.div>
         </AnimatePresence>
       </main>
+      <ApprovalModal />
     </div>
   );
 }

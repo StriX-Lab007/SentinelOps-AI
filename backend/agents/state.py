@@ -116,6 +116,9 @@ class AgentState(TypedDict, total=False):
     rollback_target: Optional[str]
     """Target version/commit for rollback actions; None when not applicable."""
 
+    requires_approval: bool
+    """True if remediation confidence is low and human approval is required."""
+
     # -- Reporting outputs -------------------------------------------------
     report_markdown: str
     """Full structured incident report in Markdown, written to Incident.summary."""
@@ -136,6 +139,12 @@ class AgentState(TypedDict, total=False):
     {'planner': {...}, 'log_agent': {...}, ...}.
     Consumed by the frontend dashboard to render per-agent panels."""
 
+    snapshots: Annotated[List[Dict[str, Any]], add]
+    """List of snapshot events generated during this execution."""
+
     errors: Annotated[List[str], add]
     """Accumulated non-fatal error messages from any agent node.
     The pipeline continues even when errors are present."""
+    
+    simulate_failures: str
+    """Comma-separated list of failure simulation toggles."""

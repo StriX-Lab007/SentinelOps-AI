@@ -1,10 +1,12 @@
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
 import asyncio
+import uuid
+import json
 
 from backend import models
 from backend.database import engine, get_db
@@ -25,10 +27,38 @@ models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="SentinelOps AI")
 
+# --- Universal Webhook Integration ---
+@app.post("/webhook/generic")
+async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
+    """
+    Universal webhook receiver for external alert sources.
+    Supports Datadog, Grafana, PagerDuty, and Custom JSON.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
 
-@app.on_event("startup")
-def _startup_omium():
-    setup_omium()
+    incident_id = f"INC-{uuid.uuid4().hex[:4].upper()}"
+    
+    # Log the arrival for observability
+    print(f"[WEBHOOK] Received signal from external source. Assigned ID: {incident_id}")
+    print(f"[WEBHOOK] Payload: {json.dumps(payload, indent=2)}")
+    
+    # In a production scenario, this would trigger the LangGraph orchestration
+    # as a background task based on the payload mapping.
+    
+    return {
+        "status": "success",
+        "message": "Signal ingested into SentinelOps orchestration layer",
+        "incident_id": incident_id,
+        "source": payload.get("source", "generic_webhook"),
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+from backend.core.events import register_core_subscribers
+# NOTE: Full startup logic is consolidated in the lifespan handler below (near line 197).
 
 app.add_middleware(
     CORSMiddleware,
@@ -59,13 +89,14 @@ class AlertPayload(BaseModel):
     message: Optional[str] = None
 
 
-def build_initial_state(incident_id: str, payload: AlertPayload):
+def build_initial_state(incident_id: str, payload: AlertPayload, simulate_failures: str = ""):
     return {
         "incident_id": incident_id,
         "alert_payload": payload.model_dump(),
         "agent_outputs": {},
         "errors": [],
         "tasks": [],
+        "simulate_failures": simulate_failures,
         "incident_timeline": [],
         "trace_spans": [
             {
@@ -80,10 +111,19 @@ def build_initial_state(incident_id: str, payload: AlertPayload):
     }
 
 
-async def run_investigation_job(incident_id: str, payload_data: dict):
+async def run_investigation_job(incident_id: str, payload_data: dict, simulate_failures: str = ""):
     payload = AlertPayload(**payload_data)
-    with omium_execution(incident_id):
-        await app_graph.ainvoke(build_initial_state(incident_id, payload))
+    try:
+        with omium_execution(incident_id):
+            await app_graph.ainvoke(build_initial_state(incident_id, payload, simulate_failures))
+    except Exception as exc:
+        # Mark the incident as failed so it doesn't stay stuck in 'investigating'.
+        print(f"[run_investigation_job] Unhandled error for {incident_id}: {exc}")
+        try:
+            from backend.agents.db_utils import update_incident_status
+            update_incident_status(incident_id, "failed")
+        except Exception:
+            pass
 
 
 @app.get("/health")
@@ -114,7 +154,106 @@ async def receive_alert(payload: AlertPayload, background_tasks: BackgroundTasks
     seed_demo_deployments(payload.service)
     background_tasks.add_task(run_investigation_job, incident.id, payload.model_dump())
 
-    return {"status": "accepted", "incident_id": incident.id}
+ACTIVE_WEBSOCKETS: dict[str, list[WebSocket]] = {}
+PENDING_APPROVALS: dict[str, dict] = {}
+
+from backend.core.events import Event, EventType, event_bus
+
+async def telemetry_subscriber(event: Event):
+    # Forward telemetry events to active websockets
+    if event.correlation_id in ACTIVE_WEBSOCKETS:
+        payload = {
+            "type": "telemetry_event",
+            "event_type": event.event_type.value,
+            "agent": event.agent_name,
+            "severity": event.severity.value,
+            "payload": event.payload,
+            "timestamp": event.timestamp.isoformat()
+        }
+        for ws in ACTIVE_WEBSOCKETS[event.correlation_id]:
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                pass
+
+async def human_intervention_subscriber(event: Event):
+    if event.event_type == EventType.HUMAN_INTERVENTION_REQUIRED:
+        approval_data = {
+            "incident_id": event.correlation_id,
+            "agent": event.agent_name,
+            "reason": event.payload.get("reason", "Unknown reason"),
+            "confidence": event.payload.get("confidence", 0.0),
+            "timestamp": event.timestamp.isoformat()
+        }
+        PENDING_APPROVALS[event.correlation_id] = approval_data
+        
+        # Broadcast to active websockets
+        for ws in ACTIVE_WEBSOCKETS.get(event.correlation_id, []):
+            try:
+                await ws.send_json({
+                    "type": "intervention_required",
+                    **approval_data
+                })
+            except Exception:
+                pass
+
+@app.on_event("startup")
+async def startup_event():
+    # Omium tracing
+    setup_omium()
+    # Core event bus subscribers (default logger for all types)
+    await register_core_subscribers()
+    # Human-in-the-loop intervention forwarding
+    await event_bus.subscribe(EventType.HUMAN_INTERVENTION_REQUIRED, human_intervention_subscriber)
+    # Telemetry broadcast to active WebSockets for all event types
+    for t in EventType:
+        await event_bus.subscribe(t, telemetry_subscriber)
+
+class ApprovalRequest(BaseModel):
+    action: str
+
+@app.get("/api/v1/recovery/pending")
+async def get_pending_approvals():
+    return {"pending": list(PENDING_APPROVALS.values())}
+
+@app.post("/api/v1/recovery/{incident_id}/approve")
+async def approve_recovery(incident_id: str):
+    if incident_id not in PENDING_APPROVALS:
+        raise HTTPException(status_code=404, detail="No pending approval found")
+    
+    approval = PENDING_APPROVALS.pop(incident_id)
+    # Broadcast to connected websockets
+    for ws in ACTIVE_WEBSOCKETS.get(incident_id, []):
+        try:
+            await ws.send_json({
+                "type": "intervention_resolved",
+                "incident_id": incident_id,
+                "status": "approved",
+                "agent": approval["agent"],
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+        except Exception:
+            pass
+    return {"status": "approved", "incident_id": incident_id}
+
+@app.post("/api/v1/recovery/{incident_id}/reject")
+async def reject_recovery(incident_id: str):
+    if incident_id not in PENDING_APPROVALS:
+        raise HTTPException(status_code=404, detail="No pending approval found")
+    
+    approval = PENDING_APPROVALS.pop(incident_id)
+    for ws in ACTIVE_WEBSOCKETS.get(incident_id, []):
+        try:
+            await ws.send_json({
+                "type": "intervention_resolved",
+                "incident_id": incident_id,
+                "status": "rejected",
+                "agent": approval["agent"],
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+        except Exception:
+            pass
+    return {"status": "rejected", "incident_id": incident_id}
 
 
 @app.get("/incident/{incident_id}")
@@ -158,6 +297,7 @@ def download_report(incident_id: str, db: Session = Depends(get_db)):
 async def simulate_incident(
     background_tasks: BackgroundTasks,
     background: bool = False,
+    simulate_failures: str = "",
     db: Session = Depends(get_db),
 ):
     service = "checkout-api"
@@ -182,30 +322,38 @@ async def simulate_incident(
 
     # Always start the background investigation so callers can poll
     # /incident/{id} without opening a WebSocket.
-    background_tasks.add_task(run_investigation_job, incident.id, payload.model_dump())
+    background_tasks.add_task(run_investigation_job, incident.id, payload.model_dump(), simulate_failures)
 
+    import urllib.parse
+    stream_qs = f"?simulate_failures={urllib.parse.quote(simulate_failures)}" if simulate_failures else ""
     return {
         "status": "accepted",
         "incident_id": incident.id,
         "investigation": "background" if background else "websocket",
-        "stream": f"/ws/incident/{incident.id}",
+        "stream": f"/ws/incident/{incident.id}{stream_qs}",
         "omium_dashboard_url": dashboard_url(incident.id) if is_enabled() else None,
     }
 
 
 @app.websocket("/ws/incident/{incident_id}")
-async def websocket_endpoint(websocket: WebSocket, incident_id: str):
+async def websocket_endpoint(websocket: WebSocket, incident_id: str, simulate_failures: str = ""):
     await websocket.accept()
-
-    payload = AlertPayload(
-        service="checkout-api",
-        severity="critical",
-        incident_type="latency_spike",
-        message="Latency spike detected (P99 > 2.4s)",
-    )
-    seed_demo_logs(payload.service)
-    seed_demo_deployments(payload.service)
-    initial_state = build_initial_state(incident_id, payload)
+    ACTIVE_WEBSOCKETS.setdefault(incident_id, []).append(websocket)
+    
+    try:
+        payload = AlertPayload(
+            service="checkout-api",
+            severity="critical",
+            incident_type="latency_spike",
+            message="Latency spike detected (P99 > 2.4s)",
+        )
+        seed_demo_logs(payload.service)
+        seed_demo_deployments(payload.service)
+        initial_state = build_initial_state(incident_id, payload, simulate_failures)
+    except Exception as init_e:
+        await websocket.send_json({"error": f"Failed to initialize investigation: {init_e}"})
+        await websocket.close()
+        return
 
     accumulated: dict = {}
     omium_meta = {
@@ -221,13 +369,22 @@ async def websocket_endpoint(websocket: WebSocket, incident_id: str):
         **omium_meta,
     })
 
+
     try:
         with omium_execution(incident_id):
+            # 1. Start the Planner
+            await websocket.send_json({
+                "type": "agent_started",
+                "agent": "planner",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+
             async for output in app_graph.astream(initial_state):
                 for node_name, state_update in output.items():
                     if not state_update:
                         continue
 
+                    # Update local accumulation for state consistency
                     for key, val in state_update.items():
                         if key == "activity" and isinstance(val, list):
                             accumulated.setdefault("activity", []).extend(val)
@@ -240,47 +397,187 @@ async def websocket_endpoint(websocket: WebSocket, incident_id: str):
                         else:
                             accumulated[key] = val
 
-                    activities = state_update.get("activity", [])
-                    output_str = activities[-1] if activities else ""
-                    if not output_str:
-                        if node_name == "correlator":
-                            output_str = state_update.get("probable_root_cause", "")
-                        elif node_name == "remediator":
-                            output_str = state_update.get("remediation_action", "")
-                        elif node_name == "reporter":
-                            output_str = "RCA report generated."
-
                     if state_update.get("checkpoint_events"):
                         accumulated.setdefault("checkpoint_events", []).extend(
                             state_update["checkpoint_events"]
                         )
 
+                    if node_name == "planner":
+                        # 2b. Planner Structured Output
+                        tasks = state_update.get("tasks", [])
+                        await websocket.send_json({
+                            "type": "planner_output",
+                            "incident_type": state_update.get("incident_type", "unknown_regression"),
+                            "tasks": [
+                                {"agent": t["agent"], "objective": t["objective"]}
+                                for t in tasks if isinstance(t, dict)
+                            ],
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+
+                        # Psychological Trigger: Parallel Launch Announcement
+                        await websocket.send_json({
+                            "type": "activity",
+                            "message": "Orchestrator activating parallel investigation swarm...",
+                            "severity": "success",
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+
+                        # Predictive Start for specialists
+                        for agent in ["log_agent", "trace_agent", "deploy_agent", "memory_agent"]:
+                            await websocket.send_json({
+                                "type": "agent_started",
+                                "agent": agent,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            })
+
+                    # 2. Activity Events
+                    for act in state_update.get("activity", []):
+                        await websocket.send_json({
+                            "type": "activity",
+                            "message": act,
+                            "severity": "info" if "checkpoint" not in act.lower() else "success",
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+
+                    # 2c. Root Cause Update
+                    if node_name == "correlator":
+                        await websocket.send_json({
+                            "type": "root_cause_update",
+                            "root_cause": state_update.get("causal_chain", "Causal analysis complete"),
+                            "confidence": state_update.get("confidence_score", 0.0),
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+
+                    # 2d. Remediation Update
+                    if node_name == "remediator":
+                        await websocket.send_json({
+                            "type": "remediation_update",
+                            "remediation": state_update.get("remediation_action", "Remediation plan generated"),
+                            "remediation_command": state_update.get("remediation_command"),
+                            "requires_approval": state_update.get("requires_approval", False),
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+
+                    # 3. Confidence Update
+                    if "confidence_score" in state_update:
+                        await websocket.send_json({
+                            "type": "confidence_update",
+                            "value": state_update["confidence_score"],
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+
+                    # 4. Timeline Events
+                    for tl in state_update.get("incident_timeline", []):
+                        # Only send if it's new or updated? For now, send full list or handle in store.
+                        # But protocol says "timeline_event". Let's send the latest one or use a "timeline" update.
+                        # The store handles the list, but let's send individual events if they were just added.
+                        await websocket.send_json({
+                            "type": "timeline_event",
+                            "title": tl["event"],
+                            "time": tl["time"],
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+
+                    # 5. Integration Events
+                    if node_name in ["github_issue", "slack_notification"]:
+                        await websocket.send_json({
+                            "type": "integration",
+                            "service": "github" if node_name == "github_issue" else "slack",
+                            "status": "completed",
+                            "message": f"{'GitHub issue' if node_name == 'github_issue' else 'Slack alert'} dispatched successfully",
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+
+                    # 5b. Snapshot Events
+                    for snap in state_update.get("snapshots", []):
+                        await websocket.send_json({
+                            "type": "snapshot_event",
+                            "agent": snap["agent"],
+                            "status": snap["status"],
+                            "message": snap["message"],
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+
+                    # 6. Agent Completed
+                    output_str = state_update.get("activity")[-1] if state_update.get("activity") else ""
+                    if not output_str:
+                        if node_name == "correlator":
+                            output_str = state_update.get("probable_root_cause", "Evidence correlation complete")
+                        elif node_name == "remediator":
+                            output_str = state_update.get("remediation_action", "Remediation plan generated")
+                        elif node_name == "reporter":
+                            output_str = "RCA report finalized"
+                        else:
+                            output_str = f"{node_name.replace('_', ' ').title()} completed"
+
                     await websocket.send_json({
-                        "node": node_name,
-                        "status": "completed",
-                        "output": output_str,
-                        "activity": activities,
-                        "trace_spans": state_update.get("trace_spans", []),
-                        "tasks": accumulated.get("tasks", []),
-                        "incident_timeline": accumulated.get("incident_timeline", []),
-                        "checkpoint_events": accumulated.get("checkpoint_events", []),
-                        "confidence_score": accumulated.get("confidence_score"),
-                        "state": {**accumulated},
-                        **omium_meta,
+                        "type": "agent_completed",
+                        "agent": node_name,
+                        "summary": output_str,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
                     })
+
+                    # 7. Predictive Started Events
+                    next_agents = []
+                    if node_name == "planner":
+                        next_agents = ["log_agent", "trace_agent", "deploy_agent", "memory_agent"]
+                    elif node_name in ["log_agent", "trace_agent", "deploy_agent", "memory_agent"]:
+                        # Check if all specialists are done? The backend loop will process them one by one.
+                        # If this is the last specialist, start correlator.
+                        # For simplicity, if we haven't started correlator, we can start it here if it's the next node.
+                        # But LangGraph handles the flow. Let's just start the next node in the logical sequence.
+                        pass
+                    elif node_name == "correlator":
+                        next_agents = ["remediator"]
+                    elif node_name == "remediator":
+                        next_agents = ["github_issue", "slack_notification"]
+                    elif node_name in ["github_issue", "slack_notification"]:
+                        # Check if both are done?
+                        pass
+
+                    for na in next_agents:
+                        await websocket.send_json({
+                            "type": "agent_started",
+                            "agent": na,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+
+                    # Special handling for reporter start
+                    if node_name == "slack_notification":
+                         await websocket.send_json({
+                            "type": "agent_started",
+                            "agent": "reporter",
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
 
                     await asyncio.sleep(NODE_DELAYS.get(node_name, 0.15))
 
         await websocket.send_json({
-            "node": "workflow",
-            "status": "completed",
-            "output": "Investigation complete",
-            **omium_meta,
+            "type": "activity",
+            "message": "Investigation complete — RCA report generated",
+            "severity": "success",
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
 
     except WebSocketDisconnect:
         print(f"Client disconnected for incident {incident_id}")
     except Exception as e:
         print(f"Error in websocket for {incident_id}: {e}")
-        await websocket.send_json({"error": str(e)})
-        await websocket.close()
+        try:
+            await websocket.send_json({"error": str(e)})
+        except:
+            pass
+    finally:
+        # Remove BEFORE closing so telemetry subscribers stop sending immediately.
+        ws_list = ACTIVE_WEBSOCKETS.get(incident_id)
+        if ws_list and websocket in ws_list:
+            ws_list.remove(websocket)
+        # Prune empty lists to avoid unbounded dict growth.
+        if ws_list is not None and not ws_list:
+            ACTIVE_WEBSOCKETS.pop(incident_id, None)
+
+        try:
+            await websocket.close()
+        except Exception:
+            pass

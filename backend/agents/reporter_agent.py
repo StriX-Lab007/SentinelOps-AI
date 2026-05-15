@@ -215,18 +215,17 @@ def reporter_agent(state: AgentState) -> AgentState:
         # Persist to DB
         try:
             import json as _json
-            db = SessionLocal()
-            incident = db.query(models.Incident).filter(models.Incident.id == incident_id).first()
-            if incident:
-                incident.summary = report_markdown
-                incident.status = "resolved"
-                incident.root_cause = root_cause
-                incident.causal_chain = state.get("causal_chain")
-                incident.confidence_score = confidence
-                incident.remediation_action = action
-                incident.agent_outputs_json = _json.dumps(agent_outputs, default=str)
-                db.commit()
-            db.close()
+            with SessionLocal() as db:
+                incident = db.query(models.Incident).filter(models.Incident.id == incident_id).first()
+                if incident:
+                    incident.summary = report_markdown
+                    incident.status = "resolved"
+                    incident.root_cause = root_cause
+                    incident.causal_chain = state.get("causal_chain")
+                    incident.confidence_score = confidence
+                    incident.remediation_action = action
+                    incident.agent_outputs_json = _json.dumps(agent_outputs, default=str)
+                    db.commit()
         except Exception as e:
             print(f"[ReporterAgent] DB write failed: {e}")
 

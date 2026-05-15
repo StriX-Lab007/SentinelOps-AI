@@ -185,6 +185,12 @@ def correlation_agent(state: AgentState) -> AgentState:
         memory_context = state.get("memory_context", "")
         web_search = state.get("web_search_context", "")
 
+        simulate = "malformed_output" in state.get("simulate_failures", "")
+        retries = state.get("correlation_agent_retries", 0)
+        
+        if simulate and retries == 0:
+            raise ValueError("jsondecodeerror: Expecting value: line 1 column 1 (char 0)")
+
         # 1. Try LLM
         result = _correlate_llm(
             service=service,

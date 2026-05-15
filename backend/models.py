@@ -72,3 +72,16 @@ class RemediationHistory(Base):
     action: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     outcome: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+
+class ExecutionSnapshot(Base):
+    __tablename__ = "execution_snapshots"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    incident_id: Mapped[str] = mapped_column(String, nullable=False)
+    agent_name: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    inputs_json: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    outputs_json: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=_now)

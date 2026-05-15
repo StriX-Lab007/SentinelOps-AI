@@ -44,6 +44,12 @@ def deploy_agent(state: AgentState) -> AgentState:
     try:
         payload = state.get("alert_payload") or {}
         service = payload.get("service", "unknown")
+        
+        simulate = "dependency_failure" in state.get("simulate_failures", "")
+        retries = state.get("deploy_agent_retries", 0)
+        
+        if simulate and retries == 0:
+            raise ImportError("ModuleNotFoundError: No module named 'kubernetes.client'")
 
         try:
             deployments = get_recent_deployments(service, limit=10)

@@ -5,10 +5,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { GitBranch, CheckCircle2, Circle, RefreshCw, AlertTriangle, Layers, Activity, List } from 'lucide-react';
 import { useIncidentStore } from '@/store/useIncidentStore';
 import OmiumTracePanel from '@/components/orchestration/OmiumTracePanel';
+import LiveActivityStream from '@/components/shared/LiveActivityStream';
 
 type NodeStatus = 'idle' | 'running' | 'completed' | 'pending' | 'failed';
 interface AgentNode { id: string; label: string; status: NodeStatus; x: number; y: number; parallel?: boolean; }
-interface LiveEvent { time: string; text: string; type: 'info' | 'warn' | 'success' | 'error'; }
+const priorityColors: Record<string, string> = { high: '#FF6B6B', medium: '#FFB347', low: '#7B9EFF' };
 
 const QUEUE_TASKS = [
   { id: 't1', agent: 'Log Agent',    task: 'Scan error logs — billing-service', priority: 'high' as const },
@@ -16,14 +17,6 @@ const QUEUE_TASKS = [
   { id: 't3', agent: 'Deploy Agent', task: 'Diff v2.14.0 vs v2.13.9',           priority: 'medium' as const },
   { id: 't4', agent: 'Correlator',   task: 'Build causal chain from evidence',  priority: 'medium' as const },
 ];
-
-const EVENTS: LiveEvent[] = [
-  { time: '14:08:42', text: 'Planner dispatched 3 parallel agents', type: 'info' },
-  { time: '14:08:40', text: 'Planner Agent activated — building execution plan', type: 'info' },
-  { time: '14:08:39', text: 'INC-8291 webhook received — initiating triage', type: 'warn' },
-];
-
-const priorityColors: Record<string, string> = { high: '#FF6B6B', medium: '#FFB347', low: '#7B9EFF' };
 
 const statusIcon = (s: NodeStatus) => {
   if (s === 'completed') return <CheckCircle2 size={12} style={{ color: 'var(--so-stable)' }} />;
@@ -82,9 +75,6 @@ export default function OrchestrationView() {
   const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]));
   const completedCount = agentSteps.filter(s => s.status === 'completed').length;
   const isComplete = currentIncidentId && completedCount === agentSteps.length;
-  const events: LiveEvent[] = currentIncidentId
-    ? (activityLog.length > 0 ? activityLog : isInvestigating ? EVENTS : [])
-    : [];
 
   return (
     <div className="flex flex-col h-full">
@@ -200,28 +190,7 @@ export default function OrchestrationView() {
           <OmiumTracePanel />
 
           <div className="flex flex-col flex-1 min-h-0">
-            <div className="flex items-center gap-2 px-4 py-3 border-b text-[11px] font-semibold uppercase tracking-widest" style={{ borderColor: 'var(--so-border)', color: 'var(--so-text-muted)' }}>
-              <Activity size={13} /> Live Events
-            </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-1">
-              <AnimatePresence>
-                {events.map((ev, i) => {
-                  const col = ev.type === 'warn' ? 'var(--so-warn)' : ev.type === 'success' ? 'var(--so-stable)' : 'var(--so-info)';
-                  return (
-                    <motion.div key={i} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: i * 0.04 }}
-                      className="flex items-start gap-2 py-1.5 px-2 rounded-md hover:bg-white/[0.02]">
-                      <span className="text-[10px] font-mono shrink-0 mt-0.5" style={{ color: 'var(--so-text-subtle)' }}>{ev.time}</span>
-                      <div className="w-1 h-1 rounded-full shrink-0 mt-2" style={{ background: col }} />
-                      <span className="text-[11px] leading-relaxed" style={{ color: 'var(--so-text-muted)' }}>{ev.text}</span>
-                    </motion.div>
-                  );
-                })}
-                {events.length === 0 && (
-                  <p className="text-[11px] text-center py-4" style={{ color: 'var(--so-text-subtle)' }}>No live events</p>
-                )}
-              </AnimatePresence>
-            </div>
+            <LiveActivityStream />
           </div>
         </div>
       </div>

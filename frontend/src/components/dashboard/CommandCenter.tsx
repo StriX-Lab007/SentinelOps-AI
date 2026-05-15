@@ -4,10 +4,15 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle, GitBranch, Activity, Zap,
-  Clock, Play, CheckCircle2,
-  Circle, RefreshCw, XCircle, ArrowUpRight, Download
+  Clock, CheckCircle2,
+  Circle, RefreshCw, XCircle, ArrowUpRight, Download, Terminal, Globe
 } from 'lucide-react';
-import { useIncidentStore, type AgentStep, API_BASE_URL } from '@/store/useIncidentStore';
+import { useIncidentStore, type AgentStep, type InvestigationTask, type TimelineEvent, type ActivityEntry, API_BASE_URL } from '@/store/useIncidentStore';
+import LiveActivityStream from '@/components/shared/LiveActivityStream';
+import WebhookIntegrationPanel from '@/components/shared/WebhookIntegrationPanel';
+import RuntimeMemoryPanel from '@/components/shared/RuntimeMemoryPanel';
+import DemoControls from './DemoControls';
+import RuntimeEventStream from './RuntimeEventStream';
 
 // --- Types ---
 type Severity = 'critical' | 'high' | 'medium';
@@ -15,21 +20,12 @@ interface Incident {
   id: string; title: string; service: string;
   severity: Severity; time: string; status: 'investigating' | 'stable' | 'resolved';
 }
-interface ActivityEntry { time: string; text: string; type: 'info' | 'warn' | 'success' | 'error'; }
 
 // --- Static mock data ---
 const INCIDENTS: Incident[] = [
   { id: 'INC-8291', title: 'P99 Latency Spike in billing-service', service: 'billing-svc', severity: 'critical', time: '2m ago', status: 'investigating' },
   { id: 'INC-8290', title: 'Auth token validation failures', service: 'auth-svc',    severity: 'high',     time: '14m ago', status: 'stable' },
   { id: 'INC-8289', title: 'Background job queue depth elevated', service: 'worker-svc', severity: 'medium', time: '31m ago', status: 'resolved' },
-];
-const ACTIVITY: ActivityEntry[] = [
-  { time: '14:08', text: 'INC-8291 — Webhook received from Datadog', type: 'warn' },
-  { time: '14:08', text: 'Planner Agent activated for INC-8291', type: 'info' },
-  { time: '14:07', text: 'INC-8290 — Auth service recovered, latency nominal', type: 'success' },
-  { time: '13:55', text: 'Deployment v2.14.1 rolled out to billing-service', type: 'info' },
-  { time: '13:42', text: 'INC-8289 — Worker queue depth normalised', type: 'success' },
-  { time: '13:20', text: 'Trace Agent flagged span anomaly in checkout flow', type: 'warn' },
 ];
 
 const sevConfig = {
@@ -56,26 +52,37 @@ const SeverityBadge = ({ sev }: { sev: Severity }) => {
 
 const AgentStepRow = ({ step, idx }: { step: AgentStep; idx: number }) => {
   const icons: Record<AgentStep['status'], React.ReactNode> = {
-    pending:   <Circle size={13} style={{ color: 'var(--so-text-subtle)' }} />,
+    pending:   <Circle size={13} style={{ color: 'var(--so-text-subtle)', opacity: 0.3 }} />,
     running:   <RefreshCw size={13} className="animate-spin" style={{ color: 'var(--so-primary)' }} />,
     completed: <CheckCircle2 size={13} style={{ color: 'var(--so-stable)' }} />,
-    failed:    <XCircle size={13} style={{ color: 'var(--so-critical)' }} />
+    failed:    <AlertTriangle size={13} style={{ color: 'var(--so-critical)' }} />
   };
   const isRunning = step.status === 'running';
   return (
     <motion.div
       initial={{ opacity: 0, x: -8 }}
       animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: idx * 0.06 }}
-      className="flex items-start gap-3 py-2.5 px-3 rounded-md transition-colors"
-      style={{ background: isRunning ? 'rgba(168,162,255,0.06)' : 'transparent',
-               border: isRunning ? '1px solid rgba(168,162,255,0.15)' : '1px solid transparent' }}
+      transition={{ delay: idx * 0.04 }}
+      className="flex items-start gap-3 py-2 px-3 rounded-md transition-all duration-300"
+      style={{ 
+        background: isRunning ? 'rgba(168,162,255,0.06)' : 'transparent',
+        border: isRunning ? '1px solid rgba(168,162,255,0.15)' : '1px solid transparent',
+        opacity: step.status === 'pending' ? 0.6 : 1
+      }}
     >
-      <span className="mt-0.5 shrink-0">{icons[step.status]}</span>
+      <span className="mt-0.5 shrink-0 relative">
+        {icons[step.status]}
+        {isRunning && (
+          <span className="absolute -inset-1 rounded-full animate-pulse bg-indigo-500/10" />
+        )}
+      </span>
       <div className="flex flex-col gap-0.5 flex-1 min-w-0">
-        <span className="text-[12px] font-medium"
-          style={{ color: step.status === 'completed' ? 'var(--so-text)' : step.status === 'running' ? 'var(--so-primary)' : 'var(--so-text-muted)' }}>
+        <span className="text-[12px] font-medium flex items-center gap-2"
+          style={{ color: step.status === 'completed' ? 'var(--so-text)' : step.status === 'running' ? 'var(--so-primary)' : step.status === 'failed' ? 'var(--so-warn)' : 'var(--so-text-muted)' }}>
           {step.name}
+          {step.status === 'failed' && (
+            <span className="text-[9px] uppercase tracking-wider bg-red-500/10 text-red-400 px-1.5 py-0.5 rounded">Failed</span>
+          )}
         </span>
         {step.output && (
           <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }}
@@ -88,11 +95,94 @@ const AgentStepRow = ({ step, idx }: { step: AgentStep; idx: number }) => {
   );
 };
 
+const ConfidenceMeter = ({ value }: { value: number | null }) => {
+  if (value === null) return null;
+  const pct = Math.round(value * 100);
+  return (
+    <div className="mb-8 px-2">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--so-text-subtle)' }}>Evidence Correlation</span>
+        <span className="text-[14px] font-mono font-bold" style={{ color: pct > 85 ? 'var(--so-stable)' : 'var(--so-primary)' }}>{pct}%</span>
+      </div>
+      <div className="h-1.5 w-full bg-white/[0.05] rounded-full overflow-hidden">
+        <motion.div 
+          initial={{ width: 0 }}
+          animate={{ width: `${pct}%` }}
+          transition={{ type: 'spring', stiffness: 50, damping: 20 }}
+          className="h-full shadow-[0_0_10px_rgba(168,162,255,0.3)]"
+          style={{ background: pct > 85 ? 'var(--so-stable)' : 'var(--so-primary)' }}
+        />
+      </div>
+    </div>
+  );
+};
+
+const TimelineReconstruction = ({ events }: { events: TimelineEvent[] }) => {
+  if (events.length === 0) return null;
+  return (
+    <div className="mt-10 border-t pt-8 px-2" style={{ borderColor: 'var(--so-border)' }}>
+      <p className="text-[10px] font-bold uppercase tracking-widest mb-6" style={{ color: 'var(--so-text-subtle)' }}>Causal Reconstruction</p>
+      <div className="space-y-6">
+        {events.map((ev, i) => (
+          <motion.div key={i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}
+            className="flex gap-4 relative">
+            {i < events.length - 1 && (
+              <div className="absolute left-[15px] top-6 bottom-[-24px] w-[1px] bg-white/[0.06]" />
+            )}
+            <div className="w-8 h-8 rounded-lg bg-white/[0.02] border border-white/[0.06] flex items-center justify-center shrink-0 z-10 text-[9px] font-mono"
+                 style={{ color: 'var(--so-text-subtle)' }}>
+               {ev.time.split(' ')[0]}
+            </div>
+            <div className="pt-1.5 flex-1">
+               <p className="text-[12px] font-medium leading-tight" style={{ color: 'var(--so-text-muted)' }}>{ev.event}</p>
+            </div>
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const PlannerTasks = ({ tasks, incidentType }: { tasks: InvestigationTask[], incidentType: string | null }) => {
+  if (tasks.length === 0) return null;
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mb-8 p-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5"
+    >
+       <div className="flex items-center gap-2 mb-4">
+         <Activity size={14} className="text-indigo-400" />
+         <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-300">Swarm Orchestration Plan</span>
+         {incidentType && (
+            <span className="ml-auto text-[10px] font-mono bg-indigo-500/20 px-2 py-0.5 rounded text-indigo-300">
+              {incidentType.replace('_', ' ').toUpperCase()}
+            </span>
+         )}
+       </div>
+       <div className="space-y-3">
+         {tasks.map((task) => (
+           <div key={task.id} className="flex items-start gap-3">
+             <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1.5 shrink-0" />
+             <div className="flex-1">
+               <p className="text-[12px] font-medium text-white/90 leading-tight">
+                 <span className="text-indigo-400 font-bold uppercase text-[9px] mr-1.5 tracking-wider">[{task.assigned_agent.replace('_agent', '').toUpperCase()}]</span>
+                 {task.objective}
+               </p>
+             </div>
+           </div>
+         ))}
+       </div>
+    </motion.div>
+  );
+};
+
 // --- Main Component ---
 export default function CommandCenter({ onNavigate }: { onNavigate?: (tab: string) => void }) {
-  const { isInvestigating, currentIncidentId, agentSteps, activityLog, causalChain,
-          startInvestigation } = useIncidentStore();
+  const { isInvestigating, currentIncidentId, incidentType, agentSteps, incidentTimeline, confidenceScore,
+          tasks, causalChain, remediation, remediationCommand, requiresApproval, startInvestigation } = useIncidentStore();
   const [elapsed, setElapsed] = useState(0);
+  const [isWebhookOpen, setIsWebhookOpen] = useState(false);
 
   // Tick elapsed
   useEffect(() => {
@@ -101,59 +191,22 @@ export default function CommandCenter({ onNavigate }: { onNavigate?: (tab: strin
     return () => clearInterval(t);
   }, [isInvestigating]);
 
-  const handleSimulate = () => {
-    setElapsed(0);
-    startInvestigation();
-  };
-  const liveEntries = activityLog.length > 0 ? activityLog : ACTIVITY;
-
   // Metrics bar
   const metrics = [
     { label: 'Active Incidents', value: '3', color: '#FF6B6B' },
-    { label: 'Agents Running',   value: isInvestigating ? '4' : '0', color: '#A8A2FF' },
-    { label: 'MTTR Today',       value: '4m 12s', color: '#4EDE9E' },
+    { label: 'Agents Active',    value: isInvestigating ? '10' : '0', color: '#A8A2FF' },
+    { label: 'Avg MTTR',         value: '4m 12s', color: '#4EDE9E' },
     { label: 'Alerts (24h)',     value: '17', color: '#FFB347' },
   ];
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      {/* Top header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b shrink-0"
-        style={{ borderColor: 'var(--so-border)' }}>
-        <div>
-          <h1 className="text-[18px] font-semibold tracking-tight" style={{ color: 'var(--so-text)' }}>
-            Command Center
-          </h1>
-          <p className="text-[12px] mt-0.5" style={{ color: 'var(--so-text-muted)' }}>
-            Autonomous incident intelligence — real-time
-          </p>
-        </div>
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.97 }}
-          onClick={handleSimulate}
-          disabled={isInvestigating}
-          className="flex items-center gap-2 px-4 py-2 rounded-md text-[13px] font-semibold transition-all disabled:opacity-50"
-          style={{
-            background: isInvestigating ? 'rgba(168,162,255,0.12)' : '#A8A2FF',
-            color: isInvestigating ? '#A8A2FF' : '#0B0B0C',
-            boxShadow: isInvestigating ? 'none' : '0 0 20px rgba(168,162,255,0.35)',
-          }}
-        >
-          {isInvestigating
-            ? <><RefreshCw size={14} className="animate-spin" /> Investigating…</>
-            : <><Play size={14} /> Simulate Incident</>
-          }
-        </motion.button>
-      </div>
-
-      {/* Metrics row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-px border-b shrink-0"
-        style={{ borderColor: 'var(--so-border)', background: 'var(--so-border)' }}>
+    <div className="flex flex-col h-full bg-[#0D0D0F]">
+      {/* Top metrics bar */}
+      <div className="grid grid-cols-4 border-b h-14 shrink-0" style={{ borderColor: 'var(--so-border)' }}>
         {metrics.map((m) => (
-          <div key={m.label} className="flex flex-col gap-1 px-5 py-3.5" style={{ background: 'var(--so-surface)' }}>
-            <span className="text-[11px] font-medium" style={{ color: 'var(--so-text-muted)' }}>{m.label}</span>
-            <span className="text-[22px] font-bold leading-none" style={{ color: m.color }}>{m.value}</span>
+          <div key={m.label} className="flex flex-col justify-center px-6 border-r last:border-0" style={{ borderColor: 'var(--so-border)' }}>
+            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--so-text-subtle)' }}>{m.label}</span>
+            <span className="text-[15px] font-mono font-bold mt-0.5" style={{ color: m.color }}>{m.value}</span>
           </div>
         ))}
       </div>
@@ -163,13 +216,21 @@ export default function CommandCenter({ onNavigate }: { onNavigate?: (tab: strin
 
         {/* LEFT: Incident Feed */}
         <div className="w-[340px] shrink-0 flex flex-col border-r" style={{ borderColor: 'var(--so-border)' }}>
-          <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--so-border)' }}>
-            <AlertTriangle size={14} style={{ color: 'var(--so-critical)' }} />
-            <span className="text-[12px] font-semibold tracking-wide uppercase" style={{ color: 'var(--so-text-muted)' }}>
-              Active Incidents
-            </span>
-            <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-              style={{ background: 'rgba(255,107,107,0.15)', color: '#FF6B6B' }}>3</span>
+          <div className="px-4 py-3 border-b flex items-center justify-between h-12 shrink-0" style={{ borderColor: 'var(--so-border)' }}>
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={14} style={{ color: 'var(--so-critical)' }} />
+              <span className="text-[12px] font-semibold tracking-wide uppercase" style={{ color: 'var(--so-text-muted)' }}>
+                Active Stream
+              </span>
+            </div>
+            <button 
+              onClick={() => setIsWebhookOpen(true)}
+              className="p-1.5 hover:bg-white/5 rounded-md transition-all text-white/40 hover:text-indigo-400 group relative"
+              title="Connect Source"
+            >
+              <Globe size={14} />
+              <span className="absolute right-0 top-0 w-2 h-2 bg-indigo-500 rounded-full border-2 border-[#0D0D0F] scale-0 group-hover:scale-100 transition-transform" />
+            </button>
           </div>
           <div className="flex-1 overflow-y-auto">
             {INCIDENTS.map((inc, i) => (
@@ -178,157 +239,233 @@ export default function CommandCenter({ onNavigate }: { onNavigate?: (tab: strin
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.07 }}
-                whileHover={{ backgroundColor: 'rgba(255,255,255,0.03)' }}
-                className="px-4 py-3.5 border-b cursor-pointer group"
+                whileHover={{ backgroundColor: 'rgba(255,255,255,0.02)' }}
+                className="px-4 py-4 border-b cursor-pointer group transition-colors"
                 style={{ borderColor: 'var(--so-border)',
-                         background: currentIncidentId === inc.id ? 'rgba(168,162,255,0.06)' : 'transparent' }}
+                         background: currentIncidentId === inc.id ? 'rgba(168,162,255,0.04)' : 'transparent' }}
               >
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <SeverityBadge sev={inc.severity} />
                   <div className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full shrink-0"
                       style={{ background: statusConfig[inc.status].color }} />
-                    <span className="text-[10px]" style={{ color: 'var(--so-text-muted)' }}>
+                    <span className="text-[10px] font-medium" style={{ color: 'var(--so-text-muted)' }}>
                       {statusConfig[inc.status].label}
                     </span>
                   </div>
                 </div>
-                <p className="text-[12px] font-medium leading-snug mb-1" style={{ color: 'var(--so-text)' }}>
+                <p className="text-[13px] font-medium leading-tight mb-2" style={{ color: 'var(--so-text)' }}>
                   {inc.title}
                 </p>
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-mono" style={{ color: 'var(--so-text-muted)' }}>
+                  <span className="text-[11px] font-mono opacity-60" style={{ color: 'var(--so-text-muted)' }}>
                     {inc.id} · {inc.service}
                   </span>
                   <span className="text-[10px] flex items-center gap-1" style={{ color: 'var(--so-text-subtle)' }}>
-                    <Clock size={9} /> {inc.time}
+                    <Clock size={10} /> {inc.time}
                   </span>
                 </div>
               </motion.div>
             ))}
           </div>
+          
+          <DemoControls 
+            isInvestigating={isInvestigating} 
+            onSimulate={(active) => {
+              setElapsed(0);
+              startInvestigation(active);
+            }} 
+          />
         </div>
 
-        {/* MIDDLE: Agent Workflow */}
+        {/* MIDDLE: Agent Workflow & Operational View */}
         <div className="flex-1 min-w-0 flex flex-col border-r" style={{ borderColor: 'var(--so-border)' }}>
-          <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--so-border)' }}>
+          <div className="px-4 py-3 border-b flex items-center gap-2 h-12 shrink-0" style={{ borderColor: 'var(--so-border)' }}>
             <GitBranch size={14} style={{ color: 'var(--so-primary)' }} />
             <span className="text-[12px] font-semibold tracking-wide uppercase" style={{ color: 'var(--so-text-muted)' }}>
-              Agent Workflow
+              Operational Reasoning
             </span>
             {currentIncidentId && (
-              <span className="ml-auto text-[11px] font-mono" style={{ color: 'var(--so-text-muted)' }}>
+              <span className="ml-auto text-[11px] font-mono bg-white/[0.04] px-2 py-0.5 rounded" style={{ color: 'var(--so-text-muted)' }}>
                 {currentIncidentId} {isInvestigating && `· ${elapsed}s`}
               </span>
             )}
           </div>
-          <div className="flex-1 overflow-y-auto p-4">
+          
+          <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">
             <AnimatePresence mode="wait">
               {!currentIncidentId ? (
                 <motion.div key="idle"
                   initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                  className="flex flex-col items-center justify-center h-full gap-3 text-center">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center"
-                    style={{ background: 'var(--so-surface-2, #1C1C1F)' }}>
-                    <Zap size={18} style={{ color: 'var(--so-text-muted)' }} />
+                  className="flex flex-col items-center justify-center h-full gap-4 text-center">
+                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center border border-white/[0.05]"
+                    style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <Zap size={20} style={{ color: 'var(--so-text-subtle)' }} />
                   </div>
-                  <p className="text-[13px]" style={{ color: 'var(--so-text-muted)' }}>
-                    No active investigation
-                  </p>
-                  <p className="text-[11px]" style={{ color: 'var(--so-text-subtle)' }}>
-                    Click Simulate Incident to begin
-                  </p>
+                  <div>
+                    <p className="text-[14px] font-medium" style={{ color: 'var(--so-text-muted)' }}>
+                      Awaiting operational signal
+                    </p>
+                    <p className="text-[11px] mt-1" style={{ color: 'var(--so-text-subtle)' }}>
+                      Start a simulation to activate the agent swarm
+                    </p>
+                  </div>
                 </motion.div>
               ) : (
                 <motion.div key="running"
                   initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                  className="space-y-1">
-                  <div className="mb-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-widest mb-1"
-                      style={{ color: 'var(--so-text-subtle)' }}>Investigating</p>
-                    <p className="text-[14px] font-medium" style={{ color: 'var(--so-text)' }}>
-                      P99 Latency Spike in billing-service
+                  className="space-y-2 max-w-2xl mx-auto">
+                  
+                  {/* Confidence Evolution */}
+                  <ConfidenceMeter value={confidenceScore} />
+
+                  <div className="mb-6 px-2">
+                    <p className="text-[10px] font-bold uppercase tracking-widest mb-2"
+                      style={{ color: 'var(--so-text-subtle)' }}>Investigation Context</p>
+                    <p className="text-[16px] font-semibold leading-snug" style={{ color: 'var(--so-text)' }}>
+                      P99 Latency Spike in checkout-api
                     </p>
                   </div>
-                  {agentSteps.map((step, i) => (
-                    <AgentStepRow key={step.id} step={step} idx={i} />
-                  ))}
-                  {causalChain && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.2 }}
-                      className="mt-4 p-3 rounded-md border"
-                      style={{ background: 'rgba(78,222,158,0.06)', borderColor: 'rgba(78,222,158,0.2)' }}
-                    >
-                      <div className="flex items-center gap-2 mb-2">
-                        <CheckCircle2 size={13} style={{ color: 'var(--so-stable)' }} />
-                        <span className="text-[11px] font-semibold uppercase tracking-widest"
-                          style={{ color: 'var(--so-stable)' }}>Investigation Complete</span>
+
+                  <PlannerTasks tasks={tasks} incidentType={incidentType} />
+
+                  <div className="grid grid-cols-1 gap-1">
+                    {/* Planner */}
+                    {agentSteps.filter(s => s.id === 'planner').map((step, i) => (
+                      <AgentStepRow key={step.id} step={step} idx={i} />
+                    ))}
+
+                    {/* Parallel Specialists Swarm */}
+                    <div className="my-3 relative">
+                      <div className="absolute left-0 top-0 bottom-0 w-[1px] bg-white/[0.05]" />
+                      <div className="pl-2 space-y-1">
+                        {agentSteps.filter(s => ['log', 'trace', 'deploy', 'memory'].includes(s.id)).map((step, i) => (
+                          <AgentStepRow key={step.id} step={step} idx={i} />
+                        ))}
                       </div>
-                      <p className="text-[12px] leading-relaxed" style={{ color: 'var(--so-text-muted)' }}>
-                        {causalChain}
-                      </p>
-                      <div className="mt-3 flex flex-wrap items-center gap-3">
+                    </div>
+
+                    {/* The rest of the workflow */}
+                    {agentSteps.filter(s => !['planner', 'log', 'trace', 'deploy', 'memory'].includes(s.id)).map((step, i) => (
+                      <AgentStepRow key={step.id} step={step} idx={i} />
+                    ))}
+                  </div>
+
+                  {/* Convergence: Root Cause & Remediation */}
+                  {(causalChain || remediation) && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="mt-8 p-5 rounded-xl border relative overflow-hidden"
+                      style={{ background: 'rgba(78,222,158,0.03)', borderColor: 'rgba(78,222,158,0.15)' }}
+                    >
+                      <div className="flex items-center gap-2 mb-4">
+                        <CheckCircle2 size={14} style={{ color: 'var(--so-stable)' }} />
+                        <span className="text-[10px] font-bold uppercase tracking-widest"
+                          style={{ color: 'var(--so-stable)' }}>Root Cause Established</span>
+                      </div>
+                      
+                      <div className="space-y-5">
+                        {causalChain && (
+                          <div>
+                            <p className="text-[11px] font-bold uppercase tracking-widest mb-2 opacity-50" style={{ color: 'var(--so-text)' }}>Analysis</p>
+                            <p className="text-[13px] leading-relaxed font-medium" style={{ color: 'var(--so-text)' }}>
+                              {causalChain}
+                            </p>
+                          </div>
+                        )}
+                        
+                        {remediation && (
+                          <div>
+                            <p className="text-[11px] font-bold uppercase tracking-widest mb-2 opacity-50" 
+                               style={{ color: requiresApproval ? 'var(--so-warn)' : 'var(--so-stable)' }}>
+                              {requiresApproval ? 'Remediation (Requires Approval)' : 'Autonomous Remediation'}
+                            </p>
+                            <div className="flex items-start gap-2.5 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                               <Zap size={13} className="mt-0.5 text-emerald-400" />
+                               <p className="text-[12px] font-semibold text-emerald-100">{remediation}</p>
+                            </div>
+
+                            {requiresApproval ? (
+                              <div className="mt-4 p-4 rounded-xl border border-amber-500/30 bg-amber-500/5">
+                                <div className="flex items-center gap-3 mb-4">
+                                  <AlertTriangle size={18} className="text-amber-400" />
+                                  <div>
+                                    <p className="text-[10px] font-bold text-amber-300 uppercase tracking-widest">Bounded Autonomy Triggered</p>
+                                    <p className="text-[11px] text-amber-200/70">Confidence threshold (50%) not met. Awaiting operator validation.</p>
+                                  </div>
+                                </div>
+                                <div className="flex gap-2">
+                                  <button className="flex-1 py-2 rounded-lg bg-amber-500 text-black text-[11px] font-bold uppercase tracking-wider hover:bg-amber-400 transition-colors">
+                                    Approve & Execute
+                                  </button>
+                                  <button className="flex-1 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-[11px] font-bold uppercase tracking-wider hover:bg-white/10 transition-colors">
+                                    Refine Plan
+                                  </button>
+                                </div>
+                              </div>
+                            ) : remediationCommand && (
+                              <div className="mt-3 p-3 rounded-lg bg-black/40 border border-white/5">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <Terminal size={11} className="text-emerald-400" />
+                                  <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-300">Self-Patching Executed</span>
+                                </div>
+                                <div className="font-mono text-[11px] text-emerald-200">
+                                  $ {remediationCommand}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-6 pt-5 border-t flex items-center gap-4" style={{ borderColor: 'rgba(78,222,158,0.1)' }}>
                         <button
                           onClick={() => onNavigate?.('artifacts')}
-                          className="flex items-center gap-1.5 text-[11px] font-medium transition-opacity hover:opacity-80"
-                          style={{ color: 'var(--so-primary)' }}>
-                          View Artifacts <ArrowUpRight size={11} />
+                          className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-indigo-400 hover:text-indigo-300 transition-colors">
+                          View Artifacts <ArrowUpRight size={12} />
                         </button>
                         {currentIncidentId && (
                           <a
                             href={`${API_BASE_URL}/report/${currentIncidentId}/download`}
                             download
-                            className="flex items-center gap-1.5 text-[11px] font-medium"
-                            style={{ color: 'var(--so-stable)' }}
+                            className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors"
                           >
-                            <Download size={11} /> Download RCA
+                            <Download size={12} /> Download RCA
                           </a>
                         )}
                       </div>
                     </motion.div>
                   )}
+
+                  {/* Causal Timeline */}
+                  <TimelineReconstruction events={incidentTimeline} />
+
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
         </div>
 
-        {/* RIGHT: Live Stream */}
-        <div className="w-[280px] shrink-0 flex flex-col">
-          <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--so-border)' }}>
-            <Activity size={14} style={{ color: 'var(--so-info)' }} />
-            <span className="text-[12px] font-semibold tracking-wide uppercase" style={{ color: 'var(--so-text-muted)' }}>
-              Live Stream
-            </span>
+        {/* RIGHT: Live Stream & Runtime Memory */}
+        <div className="w-[340px] shrink-0 flex flex-col border-l" style={{ borderColor: 'var(--so-border)' }}>
+          <div className="flex-1 min-h-0 border-b" style={{ borderColor: 'var(--so-border)' }}>
+            <LiveActivityStream />
           </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-1">
-            {liveEntries.map((entry, i) => {
-              const typeColors = { info: 'var(--so-info)', warn: 'var(--so-warn)', success: 'var(--so-stable)', error: 'var(--so-critical)' };
-              return (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, x: 6 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.05 }}
-                  className="flex items-start gap-2.5 py-2 px-2 rounded-md hover:bg-white/[0.02] transition-colors"
-                >
-                  <span className="text-[10px] font-mono shrink-0 mt-0.5" style={{ color: 'var(--so-text-subtle)' }}>
-                    {entry.time}
-                  </span>
-                  <div className="w-1 h-1 rounded-full shrink-0 mt-1.5"
-                    style={{ background: typeColors[entry.type] }} />
-                  <span className="text-[11px] leading-relaxed" style={{ color: 'var(--so-text-muted)' }}>
-                    {entry.text}
-                  </span>
-                </motion.div>
-              );
-            })}
+          <div className="flex-1 min-h-0 border-b" style={{ borderColor: 'var(--so-border)' }}>
+            <RuntimeEventStream />
+          </div>
+          <div className="flex-1 min-h-0">
+            <RuntimeMemoryPanel />
           </div>
         </div>
 
       </div>
+
+      <WebhookIntegrationPanel 
+        isOpen={isWebhookOpen} 
+        onClose={() => setIsWebhookOpen(false)} 
+      />
     </div>
   );
 }

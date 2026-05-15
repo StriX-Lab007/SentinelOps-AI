@@ -96,7 +96,7 @@ def _fetch_with_checkpoint_retry(
             "omium_enabled": is_enabled(),
         })
 
-        activity.append("[Trace Agent] Span fetch timed out — Omium checkpoint saved")
+        activity.append("[Trace Agent] Span fetch timed out — initiating self-healing recovery")
         trace_spans_extra.append(
             _span("trace_agent_attempt_1", "planner_agent", status="failed", output="span_fetch_timeout")
         )
@@ -120,15 +120,27 @@ def _fetch_with_checkpoint_retry(
             "omium_enabled": is_enabled(),
         })
 
-        activity.append("[Trace Agent] Replaying from Omium checkpoint — retrying span fetch")
+        # Inject simulated snapshot events for the new Runtime Memory Panel
+        snapshots = [
+            {"agent": "trace_agent", "status": "failed", "message": "Trace Agent failed (timeout)"},
+            {"agent": "logging_agent", "status": "stored", "message": "Logging Agent detected failure"},
+            {"agent": "recovery_agent", "status": "replayed", "message": "Recovery workflow initiated"},
+            {"agent": "recovery_agent", "status": "recovered", "message": "Checkpoint replay successful"}
+        ]
+
+        activity.append("[Trace Agent] ♻️ Replay successful — recovering traces from checkpoint")
         trace_spans_extra.append(
             _span("trace_agent_replay", "planner_agent", status="running", output="checkpoint replay")
         )
         time.sleep(0.45)
+        
+        spans = fetch_trace_spans(service, limit=100)
+        trace_summary = summarise_traces(spans, service)
+        return spans, trace_summary, activity, trace_spans_extra, checkpoint_events, snapshots
 
     spans = fetch_trace_spans(service, limit=100)
     trace_summary = summarise_traces(spans, service)
-    return spans, trace_summary, activity, trace_spans_extra, checkpoint_events
+    return spans, trace_summary, activity, trace_spans_extra, checkpoint_events, []
 
 
 def trace_agent(state: AgentState) -> AgentState:
@@ -141,11 +153,21 @@ def trace_agent(state: AgentState) -> AgentState:
     try:
         payload = state.get("alert_payload") or {}
         service = payload.get("service", "unknown")
+        
+        # Determine simulation toggle
+        simulate = "trace_timeout" in state.get("simulate_failures", "")
+        retries = state.get("trace_agent_retries", 0)
+        
+        if simulate and retries == 0:
+            raise TimeoutError("Deadline exceeded: Trace API failed to respond in time.")
 
         try:
-            spans, trace_summary, activity, trace_spans_extra, checkpoint_events = (
-                _fetch_with_checkpoint_retry(state, service, incident_id or "")
-            )
+            spans = fetch_trace_spans(service, limit=100)
+            trace_summary = summarise_traces(spans, service)
+            activity = []
+            trace_spans_extra = []
+            checkpoint_events = []
+            snapshots = []
         except Exception as exc:
             error_msg = f"TraceAgent error: {exc}"
             print(f"[TraceAgent] {error_msg}")
@@ -200,6 +222,7 @@ def trace_agent(state: AgentState) -> AgentState:
             ],
             "trace_summary": trace_summary,
             "checkpoint_events": checkpoint_events,
+            "snapshots": snapshots,
             "agent_outputs": agent_outputs,
             "activity": out_activity,
             "incident_timeline": append_timeline(

@@ -62,12 +62,14 @@ export default function GeneratedArtifactsView() {
                       High Confidence
                     </Badge>
                     {reportUrl && (
-                      <Button variant="outline" size="sm" className="h-8 gap-1.5" asChild>
-                        <a href={reportUrl} download>
-                          <Download className="h-3.5 w-3.5" />
-                          Download RCA
-                        </a>
-                      </Button>
+                      <a 
+                        href={reportUrl} 
+                        download
+                        className="inline-flex items-center justify-center rounded-md text-sm font-medium border border-slate-700 h-8 px-3 gap-1.5 hover:bg-slate-800 text-slate-300 transition-colors"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Download RCA
+                      </a>
                     )}
                   </div>
                 </div>

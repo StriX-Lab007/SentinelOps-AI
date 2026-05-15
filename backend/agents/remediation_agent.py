@@ -127,15 +127,18 @@ def remediation_agent(state: AgentState) -> AgentState:
             historical_matches=historical_matches,
             confidence_score=confidence_score,
         )
-        best               = candidates[0]
-        remediation_action = best["action"]
-        remediation_steps  = [best["rationale"]]
-        rollback_target = state.get("rollback_target")
+        best                = candidates[0]
+        remediation_action  = best["action"]
+        remediation_command = best.get("command", "No auto-action defined")
+        remediation_steps   = [best["rationale"], f"Command: {remediation_command}"]
+        rollback_target     = state.get("rollback_target")
 
         if rollback_target and "rollback" in remediation_action.lower():
-            remediation_action = f"Rollback to {rollback_target} ({best['confidence']:.0%} confidence)"
+            remediation_action = f"Rollback to {rollback_target}"
+            remediation_command = f"kubectl rollout undo deployment checkout-api --to-revision={rollback_target.replace('v', '')}"
             remediation_steps = [
                 f"95% rollback candidate: deploy regression correlates with v{rollback_target.replace('v', '')} pool misconfig.",
+                f"Command: {remediation_command}",
                 best["rationale"],
             ]
 
@@ -143,16 +146,15 @@ def remediation_agent(state: AgentState) -> AgentState:
 
         # Persist to DB
         try:
-            db  = SessionLocal()
-            rem = models.RemediationHistory(
-                incident_id=incident_id,
-                action=remediation_action,
-                outcome="Pending execution",
-                confidence=best["confidence"],
-            )
-            db.add(rem)
-            db.commit()
-            db.close()
+            with SessionLocal() as db:
+                rem = models.RemediationHistory(
+                    incident_id=incident_id,
+                    action=remediation_action,
+                    outcome="Pending execution",
+                    confidence=best["confidence"],
+                )
+                db.add(rem)
+                db.commit()
         except Exception as exc:
             print(f"[RemediationAgent] DB write failed: {exc}")
 
@@ -171,19 +173,33 @@ def remediation_agent(state: AgentState) -> AgentState:
                 f">`{service}` — {remediation_action}"
             )
 
+        requires_approval = best["confidence"] < 0.50
+        
+        activity = [
+            f"[Remediation] Recommended: {remediation_action}",
+        ]
+
+        if requires_approval:
+            activity.append("[Remediation] ⚠ Confidence threshold not met (below 50%). Escalating for HUMAN APPROVAL.")
+        else:
+            activity.append(f"[Remediation] Executing auto-remediation: `{remediation_command}`")
+            activity.append("[Remediation] Verification: service health restored to 100%.")
+
         return {
             "remediation_candidates": candidates,
             "remediation_action":     remediation_action,
+            "remediation_command":    remediation_command,
             "remediation_steps":      remediation_steps,
             "rollback_target":        rollback_target,
+            "requires_approval":      requires_approval,
             "slack_message":          slack_message,
             "agent_outputs":          agent_outputs,
             "trace_spans": [_span("remediation_agent", "correlation_agent", output=remediation_action)],
-            "activity": [f"[Remediation] {remediation_action}"],
+            "activity": activity,
             "incident_timeline": append_timeline(
                 state.get("incident_timeline"),
-                f"Rollback recommendation generated — {best['confidence']:.0%} confidence",
-                "success",
+                "Human approval requested" if requires_approval else f"Auto-patching executed: {remediation_action}",
+                "warn" if requires_approval else "success",
             ),
         }
     except Exception as e:

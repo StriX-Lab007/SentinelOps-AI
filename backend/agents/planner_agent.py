@@ -150,6 +150,10 @@ def _plan_llm(service: str, severity: str, message: str) -> Optional[Dict[str, A
         print(f"[PlannerAgent] LLM failed: {e}")
         return None
 
+from backend.core.events import Event, EventType, EventSeverity
+from backend.core.events.event_bus import sync_publish
+import time
+
 # -- Node -------------------------------------------------------------------
 
 def planner_agent(state: AgentState) -> AgentState:
@@ -158,6 +162,15 @@ def planner_agent(state: AgentState) -> AgentState:
     
     incident_id = state.get("incident_id")
     update_incident_status(incident_id, "planning")
+    start_time = time.time()
+
+    sync_publish(Event(
+        correlation_id=incident_id or "UNKNOWN",
+        agent_name="planner_agent",
+        event_type=EventType.TASK_STARTED,
+        task_id="incident-planning",
+        payload={"current_state": "started"}
+    ))
 
     try:
         payload = state.get("alert_payload", {})
@@ -206,6 +219,19 @@ def planner_agent(state: AgentState) -> AgentState:
             timeline_event(f"Planner classified incident as {incident_type.replace('_', ' ')}", "info"),
             timeline_event("Evidence agents dispatched in parallel", "info"),
         ]
+
+        sync_publish(Event(
+            correlation_id=incident_id or "UNKNOWN",
+            agent_name="planner_agent",
+            event_type=EventType.TASK_COMPLETED,
+            task_id="incident-planning",
+            payload={
+                "execution_time_ms": int((time.time() - start_time) * 1000),
+                "generated_tasks_count": len(tasks),
+                "incident_type": incident_type,
+                "current_state": "completed"
+            }
+        ))
 
         return {
             "incident_type": incident_type,
