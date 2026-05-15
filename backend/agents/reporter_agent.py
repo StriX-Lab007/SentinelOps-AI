@@ -182,8 +182,11 @@ def reporter_agent(state: AgentState) -> AgentState:
     """LangGraph node - builds report and dispatches notifications."""
     print("[ReporterAgent] Generating final report ...")
     
-    incident_id = state.get("incident_id", "")
-    update_incident_status(incident_id, "reporting")
+    incident_id = state.get("incident_id")
+    if incident_id is not None:
+        update_incident_status(incident_id, "reporting")
+    else:
+        incident_id = ""
 
     try:
         timestamp = datetime.now(timezone.utc).isoformat()

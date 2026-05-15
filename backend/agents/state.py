@@ -113,6 +113,9 @@ class AgentState(TypedDict, total=False):
     remediation_steps: List[str]
     """Ordered step-by-step instructions to execute the chosen remediation."""
 
+    remediation_command: str
+    """Machine-executable CLI command to apply the remediation (e.g. 'kubectl rollout undo')."""
+
     rollback_target: Optional[str]
     """Target version/commit for rollback actions; None when not applicable."""
 

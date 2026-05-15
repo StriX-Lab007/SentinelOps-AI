@@ -113,7 +113,10 @@ def remediation_agent(state: AgentState) -> AgentState:
     print("[RemediationAgent] Deciding remediation...")
     
     incident_id = state.get("incident_id")
-    update_incident_status(incident_id, "remediating")
+    if incident_id is not None:
+        update_incident_status(incident_id, "remediating")
+    else:
+        incident_id = ""
 
     try:
         probable_root_cause = state.get("probable_root_cause",  "")

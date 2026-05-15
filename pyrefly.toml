@@ -2,7 +2,11 @@
 # https://github.com/facebook/pyrefly
 
 [pyrefly]
-python_interpreter = ".venv/bin/python"
+python_interpreter = "/Users/strix/Documents/SentinalOps AI/.venv/bin/python"
+site_packages_path = [
+  "/Users/strix/Documents/SentinalOps AI/.venv/lib/python3.14/site-packages",
+]
+# Adding plural form just in case
 site_package_path = [
-  ".venv/lib/python3.14/site-packages",
+  "/Users/strix/Documents/SentinalOps AI/.venv/lib/python3.14/site-packages",
 ]

@@ -65,7 +65,7 @@ def _fetch_with_checkpoint_retry(
     state: AgentState,
     service: str,
     incident_id: str,
-) -> tuple[list[dict[str, Any]], str, list[str], list[Dict[str, Any]], list[Dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], str, list[str], list[Dict[str, Any]], list[Dict[str, Any]], list[Dict[str, Any]]]:
     """
     First attempt fails (demo); checkpoint saved; replay succeeds.
     Returns spans, summary, activity lines, extra trace spans, checkpoint events.
@@ -148,7 +148,10 @@ def trace_agent(state: AgentState) -> AgentState:
     print("[TraceAgent] Fetching distributed traces...")
 
     incident_id = state.get("incident_id")
-    update_incident_status(incident_id, "investigating")
+    if incident_id is not None:
+        update_incident_status(incident_id, "investigating")
+    else:
+        incident_id = ""
 
     try:
         payload = state.get("alert_payload") or {}

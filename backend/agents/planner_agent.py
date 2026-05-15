@@ -161,7 +161,10 @@ def planner_agent(state: AgentState) -> AgentState:
     print("[PlannerAgent] Analysing alert...")
     
     incident_id = state.get("incident_id")
-    update_incident_status(incident_id, "planning")
+    if incident_id is not None:
+        update_incident_status(incident_id, "planning")
+    else:
+        incident_id = ""
     start_time = time.time()
 
     sync_publish(Event(

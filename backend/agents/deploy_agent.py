@@ -39,7 +39,10 @@ def deploy_agent(state: AgentState) -> AgentState:
     print("[DeployAgent] Checking deployments...")
     
     incident_id = state.get("incident_id")
-    update_incident_status(incident_id, "investigating")
+    if incident_id is not None:
+        update_incident_status(incident_id, "investigating")
+    else:
+        incident_id = ""
 
     try:
         payload = state.get("alert_payload") or {}

@@ -174,7 +174,10 @@ def correlation_agent(state: AgentState) -> AgentState:
     print("[CorrelationAgent] Correlating signals ...")
     
     incident_id = state.get("incident_id")
-    update_incident_status(incident_id, "correlating")
+    if incident_id is not None:
+        update_incident_status(incident_id, "correlating")
+    else:
+        incident_id = "" # Fallback for local ops
 
     try:
         service = state.get("alert_payload", {}).get("service", "unknown")

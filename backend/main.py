@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, Request
+from contextlib import asynccontextmanager
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -25,7 +26,64 @@ from fastapi.middleware.cors import CORSMiddleware
 
 models.Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="SentinelOps AI")
+ACTIVE_WEBSOCKETS: dict[str, list[WebSocket]] = {}
+PENDING_APPROVALS: dict[str, dict] = {}
+
+from backend.core.events import Event, EventType, event_bus
+
+async def telemetry_subscriber(event: Event):
+    # Forward telemetry events to active websockets
+    if event.correlation_id in ACTIVE_WEBSOCKETS:
+        payload = {
+            "type": "telemetry_event",
+            "event_type": event.event_type.value,
+            "agent": event.agent_name,
+            "severity": event.severity.value,
+            "payload": event.payload,
+            "timestamp": event.timestamp.isoformat()
+        }
+        for ws in ACTIVE_WEBSOCKETS[event.correlation_id]:
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                pass
+
+async def human_intervention_subscriber(event: Event):
+    if event.event_type == EventType.HUMAN_INTERVENTION_REQUIRED:
+        approval_data = {
+            "incident_id": event.correlation_id,
+            "agent": event.agent_name,
+            "reason": event.payload.get("reason", "Unknown reason"),
+            "confidence": event.payload.get("confidence", 0.0),
+            "timestamp": event.timestamp.isoformat()
+        }
+        PENDING_APPROVALS[event.correlation_id] = approval_data
+        
+        # Broadcast to active websockets
+        for ws in ACTIVE_WEBSOCKETS.get(event.correlation_id, []):
+            try:
+                await ws.send_json({
+                    "type": "intervention_required",
+                    **approval_data
+                })
+            except Exception:
+                pass
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Omium tracing
+    setup_omium()
+    # Core event bus subscribers (default logger for all types)
+    from backend.core.events import register_core_subscribers
+    await register_core_subscribers()
+    # Human-in-the-loop intervention forwarding
+    await event_bus.subscribe(EventType.HUMAN_INTERVENTION_REQUIRED, human_intervention_subscriber)
+    # Telemetry broadcast to active WebSockets for all event types
+    for t in EventType:
+        await event_bus.subscribe(t, telemetry_subscriber)
+    yield
+
+app = FastAPI(title="SentinelOps AI", lifespan=lifespan)
 
 # --- Universal Webhook Integration ---
 @app.post("/webhook/generic")
@@ -152,62 +210,10 @@ async def receive_alert(payload: AlertPayload, background_tasks: BackgroundTasks
 
     seed_demo_logs(payload.service)
     seed_demo_deployments(payload.service)
-    background_tasks.add_task(run_investigation_job, incident.id, payload.model_dump())
+    incident_id: str = incident.id
+    background_tasks.add_task(run_investigation_job, incident_id, payload.model_dump())
 
-ACTIVE_WEBSOCKETS: dict[str, list[WebSocket]] = {}
-PENDING_APPROVALS: dict[str, dict] = {}
-
-from backend.core.events import Event, EventType, event_bus
-
-async def telemetry_subscriber(event: Event):
-    # Forward telemetry events to active websockets
-    if event.correlation_id in ACTIVE_WEBSOCKETS:
-        payload = {
-            "type": "telemetry_event",
-            "event_type": event.event_type.value,
-            "agent": event.agent_name,
-            "severity": event.severity.value,
-            "payload": event.payload,
-            "timestamp": event.timestamp.isoformat()
-        }
-        for ws in ACTIVE_WEBSOCKETS[event.correlation_id]:
-            try:
-                await ws.send_json(payload)
-            except Exception:
-                pass
-
-async def human_intervention_subscriber(event: Event):
-    if event.event_type == EventType.HUMAN_INTERVENTION_REQUIRED:
-        approval_data = {
-            "incident_id": event.correlation_id,
-            "agent": event.agent_name,
-            "reason": event.payload.get("reason", "Unknown reason"),
-            "confidence": event.payload.get("confidence", 0.0),
-            "timestamp": event.timestamp.isoformat()
-        }
-        PENDING_APPROVALS[event.correlation_id] = approval_data
-        
-        # Broadcast to active websockets
-        for ws in ACTIVE_WEBSOCKETS.get(event.correlation_id, []):
-            try:
-                await ws.send_json({
-                    "type": "intervention_required",
-                    **approval_data
-                })
-            except Exception:
-                pass
-
-@app.on_event("startup")
-async def startup_event():
-    # Omium tracing
-    setup_omium()
-    # Core event bus subscribers (default logger for all types)
-    await register_core_subscribers()
-    # Human-in-the-loop intervention forwarding
-    await event_bus.subscribe(EventType.HUMAN_INTERVENTION_REQUIRED, human_intervention_subscriber)
-    # Telemetry broadcast to active WebSockets for all event types
-    for t in EventType:
-        await event_bus.subscribe(t, telemetry_subscriber)
+# subscribers and app relocated above
 
 class ApprovalRequest(BaseModel):
     action: str
@@ -320,18 +326,19 @@ async def simulate_incident(
     db.commit()
     db.refresh(incident)
 
+    incident_id: str = incident.id
     # Always start the background investigation so callers can poll
     # /incident/{id} without opening a WebSocket.
-    background_tasks.add_task(run_investigation_job, incident.id, payload.model_dump(), simulate_failures)
+    background_tasks.add_task(run_investigation_job, incident_id, payload.model_dump(), simulate_failures)
 
     import urllib.parse
     stream_qs = f"?simulate_failures={urllib.parse.quote(simulate_failures)}" if simulate_failures else ""
     return {
         "status": "accepted",
-        "incident_id": incident.id,
+        "incident_id": incident_id,
         "investigation": "background" if background else "websocket",
-        "stream": f"/ws/incident/{incident.id}{stream_qs}",
-        "omium_dashboard_url": dashboard_url(incident.id) if is_enabled() else None,
+        "stream": f"/ws/incident/{incident_id}{stream_qs}",
+        "omium_dashboard_url": dashboard_url(incident_id) if is_enabled() else None,
     }
 
 
