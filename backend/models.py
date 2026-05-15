@@ -1,45 +1,74 @@
-from sqlalchemy import Column, String, Float, DateTime
+"""
+backend/models.py
+-------------------------------------------------------------------------------
+SQLAlchemy 2.0 typed ORM models.
+
+Uses ``Mapped`` + ``mapped_column`` so pyrefly/pyright understand that
+attribute assignments (e.g. incident.summary = "...") are valid str ops,
+not Column descriptor assignments.
+-------------------------------------------------------------------------------
+"""
+from __future__ import annotations
+
 from datetime import datetime, timezone
+from typing import Optional
 import uuid
+
+from sqlalchemy import String, Float, DateTime
+from sqlalchemy.orm import Mapped, mapped_column
+
 from .database import Base
 
-def generate_uuid():
+
+def _uuid() -> str:
     return str(uuid.uuid4())
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
 
 class Incident(Base):
     __tablename__ = "incidents"
-    id = Column(String, primary_key=True, default=generate_uuid)
-    title = Column(String)
-    severity = Column(String)
-    status = Column(String)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    summary = Column(String, nullable=True)
-    root_cause = Column(String, nullable=True)
-    causal_chain = Column(String, nullable=True)
-    confidence_score = Column(Float, nullable=True)
-    remediation_action = Column(String, nullable=True)
-    agent_outputs_json = Column(String, nullable=True)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    title: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    severity: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    summary: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    root_cause: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    causal_chain: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    confidence_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    remediation_action: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    agent_outputs_json: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
 
 class Deployment(Base):
     __tablename__ = "deployments"
-    id = Column(String, primary_key=True, default=generate_uuid)
-    service = Column(String)
-    version = Column(String)
-    timestamp = Column(DateTime)
-    commit_hash = Column(String)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    service: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    version: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    timestamp: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    commit_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
 
 class Log(Base):
     __tablename__ = "logs"
-    id = Column(String, primary_key=True, default=generate_uuid)
-    service = Column(String)
-    level = Column(String)
-    message = Column(String)
-    timestamp = Column(DateTime)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    service: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    level: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    message: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    timestamp: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
 
 class RemediationHistory(Base):
     __tablename__ = "remediation_history"
-    id = Column(String, primary_key=True, default=generate_uuid)
-    incident_id = Column(String)
-    action = Column(String)
-    outcome = Column(String)
-    confidence = Column(Float)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    incident_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    action: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    outcome: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

@@ -15,9 +15,13 @@ from backend.database import SessionLocal
 from backend import models
 
 
-def update_incident_status(incident_id: str, status: str) -> None:
+def update_incident_status(incident_id: str | None, status: str) -> None:
     """
     Transition the incident to *status* in the database.
+
+    Accepts ``str | None`` because ``state.get("incident_id")`` may return
+    None before the incident row has been committed.  Calls with None are
+    silently ignored — no guard needed at each call site.
 
     Safety guarantee
     ----------------
