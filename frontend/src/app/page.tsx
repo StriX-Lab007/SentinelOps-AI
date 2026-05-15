@@ -7,6 +7,7 @@ import CommandCenter from '@/components/dashboard/CommandCenter';
 import GeneratedArtifactsView from '@/components/artifacts/GeneratedArtifactsView';
 import OrchestrationView from '@/components/orchestration/OrchestrationView';
 import IncidentDetail from '@/components/incident/IncidentDetail';
+import AgentsView from '@/components/agents/AgentsView';
 
 const pageVariants: Variants = {
   initial: { opacity: 0, y: 8 },
@@ -22,6 +23,7 @@ export default function Home() {
       case 'command':        return <CommandCenter onNavigate={setActiveTab} />;
       case 'incidents':      return <IncidentDetail />;
       case 'orchestration':  return <OrchestrationView />;
+      case 'agents':         return <AgentsView />;
       case 'artifacts':      return <GeneratedArtifactsView />;
       default:
         return (

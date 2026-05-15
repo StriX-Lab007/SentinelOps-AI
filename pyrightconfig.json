@@ -1,0 +1,14 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.14",
+  "pythonPath": ".venv/bin/python",
+  "typeCheckingMode": "basic",
+  "reportMissingModuleSource": "none",
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.venv",
+    "**/backend/venv"
+  ]
+}

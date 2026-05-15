@@ -5,9 +5,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle, GitBranch, Activity, Zap,
   Clock, Play, CheckCircle2,
-  Circle, RefreshCw, XCircle, ArrowUpRight
+  Circle, RefreshCw, XCircle, ArrowUpRight, Download
 } from 'lucide-react';
-import { useIncidentStore, type AgentStep } from '@/store/useIncidentStore';
+import { useIncidentStore, type AgentStep, API_BASE_URL } from '@/store/useIncidentStore';
 
 // --- Types ---
 type Severity = 'critical' | 'high' | 'medium';
@@ -269,12 +269,24 @@ export default function CommandCenter({ onNavigate }: { onNavigate?: (tab: strin
                       <p className="text-[12px] leading-relaxed" style={{ color: 'var(--so-text-muted)' }}>
                         {causalChain}
                       </p>
-                      <button
-                        onClick={() => onNavigate?.('artifacts')}
-                        className="mt-3 flex items-center gap-1.5 text-[11px] font-medium transition-opacity hover:opacity-80"
-                        style={{ color: 'var(--so-primary)' }}>
-                        View Generated Artifacts <ArrowUpRight size={11} />
-                      </button>
+                      <div className="mt-3 flex flex-wrap items-center gap-3">
+                        <button
+                          onClick={() => onNavigate?.('artifacts')}
+                          className="flex items-center gap-1.5 text-[11px] font-medium transition-opacity hover:opacity-80"
+                          style={{ color: 'var(--so-primary)' }}>
+                          View Artifacts <ArrowUpRight size={11} />
+                        </button>
+                        {currentIncidentId && (
+                          <a
+                            href={`${API_BASE_URL}/report/${currentIncidentId}/download`}
+                            download
+                            className="flex items-center gap-1.5 text-[11px] font-medium"
+                            style={{ color: 'var(--so-stable)' }}
+                          >
+                            <Download size={11} /> Download RCA
+                          </a>
+                        )}
+                      </div>
                     </motion.div>
                   )}
                 </motion.div>

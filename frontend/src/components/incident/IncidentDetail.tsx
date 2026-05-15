@@ -54,7 +54,8 @@ const logLevelColor: Record<string, string> = { ERROR: '#FF6B6B', WARN: '#FFB347
 
 export default function IncidentDetail() {
   const [activeTab, setActiveTab] = useState<TabId>('timeline');
-  const { currentIncidentId, causalChain, remediation } = useIncidentStore();
+  const { currentIncidentId, causalChain, remediation, incidentTimeline, confidenceScore } = useIncidentStore();
+  const timeline = incidentTimeline.length > 0 ? incidentTimeline : TIMELINE;
 
   if (!currentIncidentId) {
     return (
@@ -118,7 +119,7 @@ export default function IncidentDetail() {
 
             {activeTab === 'timeline' && (
               <div className="space-y-1 max-w-2xl">
-                {TIMELINE.map((ev, i) => {
+                {timeline.map((ev, i) => {
                   const cfg = typeColors[ev.type];
                   return (
                     <motion.div key={i} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
@@ -141,7 +142,9 @@ export default function IncidentDetail() {
                   <div className="flex items-center gap-2 mb-3">
                     <GitBranch size={14} style={{ color: 'var(--so-primary)' }} />
                     <span className="text-[12px] font-semibold uppercase tracking-widest" style={{ color: 'var(--so-primary)' }}>Causal Chain</span>
-                    <span className="ml-auto text-[11px]" style={{ color: 'var(--so-stable)' }}>92% confidence</span>
+                    <span className="ml-auto text-[11px]" style={{ color: 'var(--so-stable)' }}>
+                      {confidenceScore != null ? `${Math.round(confidenceScore * 100)}% confidence` : '92% confidence'}
+                    </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5 text-[12px] font-mono">
                     {['Commit 8f92a1c', 'verifyTransaction()', 'Pool Exhaustion', 'Query Timeout', 'Latency > 2.4s'].map((step, i, arr) => (

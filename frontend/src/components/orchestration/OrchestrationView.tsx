@@ -4,6 +4,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GitBranch, CheckCircle2, Circle, RefreshCw, AlertTriangle, Layers, Activity, List } from 'lucide-react';
 import { useIncidentStore } from '@/store/useIncidentStore';
+import OmiumTracePanel from '@/components/orchestration/OmiumTracePanel';
 
 type NodeStatus = 'idle' | 'running' | 'completed' | 'pending' | 'failed';
 interface AgentNode { id: string; label: string; status: NodeStatus; x: number; y: number; parallel?: boolean; }
@@ -47,7 +48,7 @@ const nodeBorder = (s: NodeStatus) => {
 };
 
 export default function OrchestrationView() {
-  const { isInvestigating, agentSteps, currentIncidentId, activityLog } = useIncidentStore();
+  const { isInvestigating, agentSteps, currentIncidentId, activityLog, tasks } = useIncidentStore();
 
   const getNodeStatus = (id: string): NodeStatus => {
     const step = agentSteps.find(s => s.id === id);
@@ -59,20 +60,21 @@ export default function OrchestrationView() {
   };
 
   const nodes: AgentNode[] = [
-    { id: 'planner',     label: 'Planner',     status: getNodeStatus('planner'),     x: 300, y: 20 },
-    { id: 'log',         label: 'Log Agent',   status: getNodeStatus('log'),         x: 80,  y: 130, parallel: true },
-    { id: 'trace',       label: 'Trace Agent', status: getNodeStatus('trace'),       x: 300, y: 130, parallel: true },
-    { id: 'deploy',      label: 'Deploy Ag.',  status: getNodeStatus('deploy'),      x: 520, y: 130, parallel: true },
-    { id: 'correlator',  label: 'Correlator',  status: getNodeStatus('correlator'),  x: 300, y: 240 },
-    { id: 'remediation', label: 'Remediation', status: getNodeStatus('remediation'), x: 300, y: 350 },
-    { id: 'github',      label: 'GitHub',      status: getNodeStatus('github'),      x: 190, y: 460, parallel: true },
-    { id: 'slack',       label: 'Slack',       status: getNodeStatus('slack'),       x: 410, y: 460, parallel: true },
-    { id: 'reporter',    label: 'Reporter',    status: getNodeStatus('reporter'),    x: 300, y: 560 },
+    { id: 'planner',     label: 'Planner',     status: getNodeStatus('planner'),     x: 300, y: 16 },
+    { id: 'log',         label: 'Log Agent',   status: getNodeStatus('log'),         x: 40,  y: 120, parallel: true },
+    { id: 'trace',       label: 'Trace Agent', status: getNodeStatus('trace'),       x: 200, y: 120, parallel: true },
+    { id: 'deploy',      label: 'Deploy Ag.',  status: getNodeStatus('deploy'),      x: 360, y: 120, parallel: true },
+    { id: 'memory',      label: 'Memory Ag.',  status: getNodeStatus('memory'),      x: 520, y: 120, parallel: true },
+    { id: 'correlator',  label: 'Correlator',  status: getNodeStatus('correlator'),  x: 300, y: 230 },
+    { id: 'remediation', label: 'Remediation', status: getNodeStatus('remediation'), x: 300, y: 340 },
+    { id: 'github',      label: 'GitHub',      status: getNodeStatus('github'),      x: 190, y: 450, parallel: true },
+    { id: 'slack',       label: 'Slack',       status: getNodeStatus('slack'),       x: 410, y: 450, parallel: true },
+    { id: 'reporter',    label: 'Reporter',    status: getNodeStatus('reporter'),    x: 300, y: 550 },
   ];
 
   const edges = [
-    ['planner','log'], ['planner','trace'], ['planner','deploy'],
-    ['log','correlator'], ['trace','correlator'], ['deploy','correlator'],
+    ['planner','log'], ['planner','trace'], ['planner','deploy'], ['planner','memory'],
+    ['log','correlator'], ['trace','correlator'], ['deploy','correlator'], ['memory','correlator'],
     ['correlator','remediation'], ['remediation','github'], ['remediation','slack'],
     ['github','reporter'], ['slack','reporter'],
   ];
@@ -165,7 +167,17 @@ export default function OrchestrationView() {
             </div>
             <div className="p-3 space-y-1.5 overflow-y-auto">
               <AnimatePresence>
-                {(currentIncidentId ? QUEUE_TASKS : []).map((task, i) => (
+                {(currentIncidentId
+                  ? (tasks.length > 0
+                    ? tasks.map((t) => ({
+                        id: t.id,
+                        agent: t.assigned_agent.replace(/_/g, ' '),
+                        task: t.objective,
+                        priority: (t.status === 'completed' ? 'low' : 'high') as 'high' | 'medium' | 'low',
+                      }))
+                    : QUEUE_TASKS)
+                  : []
+                ).map((task, i) => (
                   <motion.div key={task.id}
                     initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -6 }} transition={{ delay: i * 0.05 }}
@@ -184,6 +196,8 @@ export default function OrchestrationView() {
               </AnimatePresence>
             </div>
           </div>
+
+          <OmiumTracePanel />
 
           <div className="flex flex-col flex-1 min-h-0">
             <div className="flex items-center gap-2 px-4 py-3 border-b text-[11px] font-semibold uppercase tracking-widest" style={{ borderColor: 'var(--so-border)', color: 'var(--so-text-muted)' }}>

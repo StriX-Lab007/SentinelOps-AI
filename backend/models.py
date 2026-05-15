@@ -14,6 +14,11 @@ class Incident(Base):
     status = Column(String)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     summary = Column(String, nullable=True)
+    root_cause = Column(String, nullable=True)
+    causal_chain = Column(String, nullable=True)
+    confidence_score = Column(Float, nullable=True)
+    remediation_action = Column(String, nullable=True)
+    agent_outputs_json = Column(String, nullable=True)
 
 class Deployment(Base):
     __tablename__ = "deployments"

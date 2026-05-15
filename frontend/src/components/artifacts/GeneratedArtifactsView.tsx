@@ -6,8 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { FileText, MessageSquare, GitPullRequest, History, Zap, CheckCircle2, ShieldAlert } from 'lucide-react';
-import { useIncidentStore } from '@/store/useIncidentStore';
+import { FileText, MessageSquare, GitPullRequest, History, Zap, CheckCircle2, ShieldAlert, Download } from 'lucide-react';
+import { useIncidentStore, API_BASE_URL } from '@/store/useIncidentStore';
 
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
@@ -23,7 +23,10 @@ const itemVariants: Variants = {
 };
 
 export default function GeneratedArtifactsView() {
-  const { causalChain, remediation, currentIncidentId } = useIncidentStore();
+  const { causalChain, remediation, currentIncidentId, rcaReport } = useIncidentStore();
+  const reportUrl = currentIncidentId
+    ? `${API_BASE_URL}/report/${currentIncidentId}/download`
+    : null;
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 pt-6 pb-20">
@@ -54,9 +57,19 @@ export default function GeneratedArtifactsView() {
                     <FileText className="h-5 w-5 text-slate-400" />
                     <CardTitle className="text-lg">Root Cause Analysis</CardTitle>
                   </div>
-                  <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 bg-emerald-500/10">
-                    High Confidence
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 bg-emerald-500/10">
+                      High Confidence
+                    </Badge>
+                    {reportUrl && (
+                      <Button variant="outline" size="sm" className="h-8 gap-1.5" asChild>
+                        <a href={reportUrl} download>
+                          <Download className="h-3.5 w-3.5" />
+                          Download RCA
+                        </a>
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="pt-6 space-y-4 text-sm text-slate-300 leading-relaxed font-mono">

@@ -3,4 +3,8 @@ uvicorn==0.29.0
 sqlalchemy==2.0.30
 pydantic==2.7.1
 langgraph==0.0.60
-langchain-core==0.2.0
+langchain-core>=0.2.2
+langchain-google-genai
+langchain-openai
+langchain-groq
+omium>=0.4.0

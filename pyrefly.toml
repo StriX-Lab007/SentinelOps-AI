@@ -1,0 +1,8 @@
+# pyrefly.toml — SentinelOps AI
+# https://github.com/facebook/pyrefly
+
+[pyrefly]
+python_interpreter = ".venv/bin/python"
+site_package_path = [
+  ".venv/lib/python3.14/site-packages",
+]
