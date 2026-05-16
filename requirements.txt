@@ -22,7 +22,7 @@ graphemeu==0.7.2
 groq==0.37.1
 grpcio==1.80.0
 grpcio-status==1.80.0
-grpcio-tools==1.70.0
+grpcio-tools==1.80.0
 h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
@@ -60,7 +60,7 @@ packaging==26.2
 platformdirs==4.9.6
 pluggy==1.6.0
 proto-plus==1.28.0
-protobuf==5.29.6
+protobuf==6.31.1
 pyasn1==0.6.3
 pyasn1_modules==0.4.2
 pycparser==3.0
