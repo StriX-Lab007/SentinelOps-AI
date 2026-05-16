@@ -19,6 +19,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from .database import Base
 
 
+from typing import Optional
+
 def _uuid() -> str:
     return str(uuid.uuid4())
 
@@ -31,46 +33,46 @@ class Incident(Base):
     __tablename__ = "incidents"
 
     id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
-    title: Mapped[str | None] = mapped_column(nullable=True)
-    severity: Mapped[str | None] = mapped_column(nullable=True)
-    status: Mapped[str | None] = mapped_column(nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(nullable=True)
+    severity: Mapped[Optional[str]] = mapped_column(nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=_now)
-    summary: Mapped[str | None] = mapped_column(nullable=True)
-    root_cause: Mapped[str | None] = mapped_column(nullable=True)
-    causal_chain: Mapped[str | None] = mapped_column(nullable=True)
-    confidence_score: Mapped[float | None] = mapped_column(nullable=True)
-    remediation_action: Mapped[str | None] = mapped_column(nullable=True)
-    agent_outputs_json: Mapped[str | None] = mapped_column(nullable=True)
+    summary: Mapped[Optional[str]] = mapped_column(nullable=True)
+    root_cause: Mapped[Optional[str]] = mapped_column(nullable=True)
+    causal_chain: Mapped[Optional[str]] = mapped_column(nullable=True)
+    confidence_score: Mapped[Optional[float]] = mapped_column(nullable=True)
+    remediation_action: Mapped[Optional[str]] = mapped_column(nullable=True)
+    agent_outputs_json: Mapped[Optional[str]] = mapped_column(nullable=True)
 
 
 class Deployment(Base):
     __tablename__ = "deployments"
 
     id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
-    service: Mapped[str | None] = mapped_column(nullable=True)
-    version: Mapped[str | None] = mapped_column(nullable=True)
-    timestamp: Mapped[datetime | None] = mapped_column(nullable=True)
-    commit_hash: Mapped[str | None] = mapped_column(nullable=True)
+    service: Mapped[Optional[str]] = mapped_column(nullable=True)
+    version: Mapped[Optional[str]] = mapped_column(nullable=True)
+    timestamp: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    commit_hash: Mapped[Optional[str]] = mapped_column(nullable=True)
 
 
 class Log(Base):
     __tablename__ = "logs"
 
     id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
-    service: Mapped[str | None] = mapped_column(nullable=True)
-    level: Mapped[str | None] = mapped_column(nullable=True)
-    message: Mapped[str | None] = mapped_column(nullable=True)
-    timestamp: Mapped[datetime | None] = mapped_column(nullable=True)
+    service: Mapped[Optional[str]] = mapped_column(nullable=True)
+    level: Mapped[Optional[str]] = mapped_column(nullable=True)
+    message: Mapped[Optional[str]] = mapped_column(nullable=True)
+    timestamp: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
 
 class RemediationHistory(Base):
     __tablename__ = "remediation_history"
 
     id: Mapped[str] = mapped_column(primary_key=True, default=_uuid)
-    incident_id: Mapped[str | None] = mapped_column(nullable=True)
-    action: Mapped[str | None] = mapped_column(nullable=True)
-    outcome: Mapped[str | None] = mapped_column(nullable=True)
-    confidence: Mapped[float | None] = mapped_column(nullable=True)
+    incident_id: Mapped[Optional[str]] = mapped_column(nullable=True)
+    action: Mapped[Optional[str]] = mapped_column(nullable=True)
+    outcome: Mapped[Optional[str]] = mapped_column(nullable=True)
+    confidence: Mapped[Optional[float]] = mapped_column(nullable=True)
 
 
 class ExecutionSnapshot(Base):
@@ -80,7 +82,7 @@ class ExecutionSnapshot(Base):
     incident_id: Mapped[str] = mapped_column(nullable=False)
     agent_name: Mapped[str] = mapped_column(nullable=False)
     status: Mapped[str] = mapped_column(nullable=False)
-    inputs_json: Mapped[str | None] = mapped_column(nullable=True)
-    outputs_json: Mapped[str | None] = mapped_column(nullable=True)
-    error: Mapped[str | None] = mapped_column(nullable=True)
+    inputs_json: Mapped[Optional[str]] = mapped_column(nullable=True)
+    outputs_json: Mapped[Optional[str]] = mapped_column(nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(nullable=True)
     timestamp: Mapped[datetime] = mapped_column(default=_now)

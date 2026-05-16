@@ -128,21 +128,8 @@ def _correlate_llm(
 ) -> Optional[Dict[str, Any]]:
     """Attempt LLM correlation using Gemini or OpenAI."""
     try:
-        # Check for keys
-        google_key = os.getenv("GOOGLE_API_KEY")
-        openai_key = os.getenv("OPENAI_API_KEY")
-        groq_key = os.getenv("GROQ_API_KEY")
-        
-        llm = None
-        if google_key:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", google_api_key=google_key)
-        elif groq_key:
-            from langchain_groq import ChatGroq
-            llm = ChatGroq(model="llama3-70b-8192", groq_api_key=groq_key)
-        elif openai_key:
-            from langchain_openai import ChatOpenAI
-            llm = ChatOpenAI(model="gpt-4-turbo-preview", openai_api_key=openai_key)
+        from backend.agents.llm_utils import get_llm
+        llm = get_llm(json_mode=True)
         
         if not llm:
             return None
@@ -192,18 +179,19 @@ def correlation_agent(state: AgentState) -> AgentState:
         retries = state.get("correlation_agent_retries", 0)
         
         if simulate and retries == 0:
-            raise ValueError("jsondecodeerror: Expecting value: line 1 column 1 (char 0)")
-
-        # 1. Try LLM
-        result = _correlate_llm(
-            service=service,
-            incident_type=incident_type,
-            logs=logs_summary,
-            deployments=deployment_summary,
-            traces=trace_summary,
-            memory=memory_context,
-            web_search=web_search,
-        )
+            print("[CorrelationAgent] Simulating malformed output for recovery testing...")
+            result = None
+        else:
+            # 1. Try LLM
+            result = _correlate_llm(
+                service=service,
+                incident_type=incident_type,
+                logs=logs_summary,
+                deployments=deployment_summary,
+                traces=trace_summary,
+                memory=memory_context,
+                web_search=web_search,
+            )
 
         # 2. Fallback to Rule-based if LLM fails or is not configured
         if not result:

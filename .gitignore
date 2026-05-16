@@ -26,6 +26,7 @@ backend/venv/
 *.pem
 *.db
 __pycache__/
+.venv/
 
 # debug
 npm-debug.log*

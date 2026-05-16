@@ -5,7 +5,7 @@
     "frontend"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev -w frontend\" \"source backend/venv/bin/activate && uvicorn backend.main:app --reload --port 8000\"",
+    "dev": "concurrently \"npm run dev -w frontend\" \"source .venv/bin/activate && uvicorn backend.main:app --reload --port 8000\"",
     "build": "npm run build -w frontend",
     "lint": "npm run lint -w frontend",
     "vercel-build": "npm run build -w frontend"

@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, Request
 from contextlib import asynccontextmanager
 from fastapi.responses import PlainTextResponse
@@ -21,6 +24,7 @@ from backend.omium_tracing import (
     dashboard_url,
     is_enabled,
     trace_webhook,
+    trace_meta,
 )
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -196,8 +200,7 @@ def get_omium_status():
 
 
 @app.post("/webhook/alert")
-@trace_webhook("webhook.alert")
-async def receive_alert(payload: AlertPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def receive_webhook(payload: AlertPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     incident_label = payload.message or payload.incident_type.replace("_", " ")
     incident = models.Incident(
         title=f"Alert: {incident_label} on {payload.service}",
@@ -327,9 +330,10 @@ async def simulate_incident(
     db.refresh(incident)
 
     incident_id: str = incident.id
-    # Always start the background investigation so callers can poll
-    # /incident/{id} without opening a WebSocket.
-    background_tasks.add_task(run_investigation_job, incident_id, payload.model_dump(), simulate_failures)
+    # Only start background investigation if explicitly requested,
+    # otherwise the WebSocket endpoint will handle the execution.
+    if background:
+        background_tasks.add_task(run_investigation_job, incident_id, payload.model_dump(), simulate_failures)
 
     import urllib.parse
     stream_qs = f"?simulate_failures={urllib.parse.quote(simulate_failures)}" if simulate_failures else ""
@@ -416,7 +420,7 @@ async def websocket_endpoint(websocket: WebSocket, incident_id: str, simulate_fa
                             "type": "planner_output",
                             "incident_type": state_update.get("incident_type", "unknown_regression"),
                             "tasks": [
-                                {"agent": t["agent"], "objective": t["objective"]}
+                                {"agent": t.get("assigned_agent", "unknown"), "objective": t.get("objective", "")}
                                 for t in tasks if isinstance(t, dict)
                             ],
                             "timestamp": datetime.now(timezone.utc).isoformat()
@@ -451,7 +455,7 @@ async def websocket_endpoint(websocket: WebSocket, incident_id: str, simulate_fa
                     if node_name == "correlator":
                         await websocket.send_json({
                             "type": "root_cause_update",
-                            "root_cause": state_update.get("causal_chain", "Causal analysis complete"),
+                            "rootCause": state_update.get("causal_chain", "Causal analysis complete"),
                             "confidence": state_update.get("confidence_score", 0.0),
                             "timestamp": datetime.now(timezone.utc).isoformat()
                         })

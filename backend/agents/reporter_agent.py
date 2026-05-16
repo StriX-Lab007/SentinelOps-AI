@@ -138,20 +138,8 @@ Output ONLY the Markdown content.
 def _report_llm(state: AgentState) -> Optional[str]:
     """Attempt LLM report generation using Gemini or OpenAI."""
     try:
-        google_key = os.getenv("GOOGLE_API_KEY")
-        openai_key = os.getenv("OPENAI_API_KEY")
-        groq_key = os.getenv("GROQ_API_KEY")
-        
-        llm = None
-        if google_key:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", google_api_key=google_key)
-        elif groq_key:
-            from langchain_groq import ChatGroq
-            llm = ChatGroq(model="llama3-70b-8192", groq_api_key=groq_key)
-        elif openai_key:
-            from langchain_openai import ChatOpenAI
-            llm = ChatOpenAI(model="gpt-4-turbo-preview", openai_api_key=openai_key)
+        from backend.agents.llm_utils import get_llm
+        llm = get_llm(json_mode=False)
         
         if not llm:
             return None

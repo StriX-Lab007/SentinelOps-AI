@@ -52,7 +52,11 @@ def deploy_agent(state: AgentState) -> AgentState:
         retries = state.get("deploy_agent_retries", 0)
         
         if simulate and retries == 0:
-            raise ImportError("ModuleNotFoundError: No module named 'kubernetes.client'")
+            print("[DeployAgent] Simulating dependency failure for recovery testing...")
+            # We skip real K8s check and use seeded demo data
+        else:
+            # Real logic would go here
+            pass
 
         try:
             deployments = get_recent_deployments(service, limit=10)

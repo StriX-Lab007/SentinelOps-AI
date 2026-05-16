@@ -42,7 +42,7 @@ def client():
 @pytest.fixture(scope="module")
 def incident_id(client):
     """Trigger /simulate once and return the incident_id for downstream tests."""
-    resp = client.post("/simulate")
+    resp = client.post("/simulate?background=true")
     assert resp.status_code == 200, f"Simulate failed: {resp.text}"
     data = resp.json()
     assert "incident_id" in data, "Response missing incident_id"
@@ -69,25 +69,25 @@ class TestHealthCheck:
 class TestSimulateFlow:
     def test_simulate_returns_200(self, client):
         """POST /simulate must return HTTP 200."""
-        resp = client.post("/simulate")
+        resp = client.post("/simulate?background=true")
         assert resp.status_code == 200
 
     def test_simulate_returns_accepted_status(self, client):
         """POST /simulate body must contain status == 'accepted'."""
-        resp = client.post("/simulate")
+        resp = client.post("/simulate?background=true")
         data = resp.json()
         assert data.get("status") == "accepted"
 
     def test_simulate_returns_incident_id(self, client):
         """POST /simulate must return a non-empty incident_id string."""
-        resp = client.post("/simulate")
+        resp = client.post("/simulate?background=true")
         data = resp.json()
         iid = data.get("incident_id")
         assert isinstance(iid, str) and len(iid) > 0
 
     def test_simulate_returns_stream_url(self, client):
         """POST /simulate must return a WebSocket stream path."""
-        resp = client.post("/simulate")
+        resp = client.post("/simulate?background=true")
         data = resp.json()
         stream = data.get("stream", "")
         assert stream.startswith("/ws/incident/")

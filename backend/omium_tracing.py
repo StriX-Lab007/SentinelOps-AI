@@ -120,14 +120,8 @@ def trace_webhook(name: str = "webhook.alert") -> Callable[[F], F]:
 
 
 def langchain_callbacks() -> List[Any]:
-    omium = _import_omium()
-    if not omium or not _INITIALIZED:
-        return []
-    try:
-        return [omium.OmiumCallbackHandler()]
-    except Exception as e:
-        logger.warning("OmiumCallbackHandler unavailable: %s", e)
-        return []
+    # Temporarily disabled to prevent AttributeError crashes during AI chain starts
+    return []
 
 
 def invoke_with_trace(chain: Any, inputs: dict) -> Any:
